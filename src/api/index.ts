@@ -4,6 +4,73 @@ import { cors } from "hono/cors"
 const app = new Hono().basePath('api');
 app.use(cors({ origin: "*" }));
 
+const SL_API = 'https://app.simplelogin.io/api';
+const SL_KEY = (globalThis as any).SIMPLELOGIN_API_KEY || process.env.SIMPLELOGIN_API_KEY || '';
+const slHeaders = () => ({ 'Authentication': SL_KEY, 'Content-Type': 'application/json' });
+
+// 인메모리 캐시 (Cloudflare Workers 인스턴스 내 유지)
+const cache = new Map<string, { data: any; ts: number }>();
+const ALIAS_TTL    = 5  * 60 * 1000; // 별칭 목록: 5분
+const ACTIVITY_TTL = 3  * 60 * 1000; // 활동 내역: 3분
+
+function getCached(key: string, ttl: number) {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.ts < ttl) return hit.data;
+  return null;
+}
+function setCached(key: string, data: any) {
+  cache.set(key, { data, ts: Date.now() });
+}
+
+// SimpleLogin - 별칭 목록
+app.get('/sl/aliases', async (c) => {
+  const page = c.req.query('page') || '0';
+  const force = c.req.query('force') === '1';
+  const cacheKey = `aliases_${page}`;
+
+  if (!force) {
+    const cached = getCached(cacheKey, ALIAS_TTL);
+    if (cached) return c.json({ ...cached, _cached: true });
+  }
+
+  try {
+    const res = await fetch(`${SL_API}/aliases?page_id=${page}`, { headers: slHeaders() });
+    if (res.status === 429) {
+      const cached = getCached(cacheKey, Infinity); // rate limit 시 만료된 캐시라도 반환
+      if (cached) return c.json({ ...cached, _cached: true, _rate_limited: true });
+      return c.json({ error: 'API 요청 한도 초과. 잠시 후 다시 시도해주세요.', aliases: [] }, 429);
+    }
+    const data = await res.json() as any;
+    if (!data.error) setCached(cacheKey, data);
+    return c.json(data);
+  } catch (e: any) { return c.json({ error: e.message }, 500); }
+});
+
+// SimpleLogin - 특정 별칭의 활동
+app.get('/sl/aliases/:id/activities', async (c) => {
+  const { id } = c.req.param();
+  const page = c.req.query('page') || '0';
+  const force = c.req.query('force') === '1';
+  const cacheKey = `activities_${id}_${page}`;
+
+  if (!force) {
+    const cached = getCached(cacheKey, ACTIVITY_TTL);
+    if (cached) return c.json({ ...cached, _cached: true });
+  }
+
+  try {
+    const res = await fetch(`${SL_API}/aliases/${id}/activities?page_id=${page}`, { headers: slHeaders() });
+    if (res.status === 429) {
+      const cached = getCached(cacheKey, Infinity);
+      if (cached) return c.json({ ...cached, _cached: true, _rate_limited: true });
+      return c.json({ error: 'API 요청 한도 초과. 잠시 후 다시 시도해주세요.', activities: [] }, 429);
+    }
+    const data = await res.json() as any;
+    if (!data.error) setCached(cacheKey, data);
+    return c.json(data);
+  } catch (e: any) { return c.json({ error: e.message }, 500); }
+});
+
 const CATEGORIES = [
   { key: 'netflix',  label: '넷플릭스',    query: '넷플릭스' },
   { key: 'disney',   label: '디즈니플러스', query: '디즈니플러스' },
