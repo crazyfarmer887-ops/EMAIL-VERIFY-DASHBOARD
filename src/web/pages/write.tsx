@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { KeyRound, PartyPopper, CheckCircle2, KeySquare, Loader2, AlertTriangle, Trophy, Info, PenLine, Check, X, Square, Clock } from "lucide-react";
 
 const STORAGE_KEY = 'graytag_cookies_v2';
 interface CookieSet { id: string; label: string; AWSALB: string; AWSALBCORS: string; JSESSIONID: string; }
@@ -221,7 +222,7 @@ export default function WritePage() {
     <div style={{ padding: '20px 16px' }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1E1B4B', margin: '0 0 16px' }}>✍️ 글 작성</h1>
       <div style={{ background: '#EDE9FE', borderRadius: 16, padding: 20, textAlign: 'center' }}>
-        <div style={{ fontSize: 32, marginBottom: 8 }}>🔐</div>
+        <KeyRound size={36} color="#C4B5FD" style={{ margin:"0 auto 10px", display:"block" }} />
         <div style={{ fontSize: 14, fontWeight: 600, color: '#7C3AED' }}>내 계정 탭에서 쿠키를 먼저 등록해주세요</div>
       </div>
     </div>
@@ -233,7 +234,7 @@ export default function WritePage() {
     return (
       <div style={{ padding: '20px 16px' }}>
         <div style={{ background: '#fff', borderRadius: 20, padding: 28, textAlign: 'center', boxShadow: '0 4px 20px rgba(167,139,250,0.15)' }}>
-          <div style={{ fontSize: 52, marginBottom: 10 }}>🎉</div>
+          <PartyPopper size={48} color="#A78BFA" style={{ margin:"0 auto 12px", display:"block" }} />
           <div style={{ fontSize: 18, fontWeight: 700, color: '#1E1B4B', marginBottom: 6 }}>등록 완료!</div>
           <div style={{ fontSize: 13, color: '#9CA3AF', marginBottom: 20 }}>
             {successItems.length}개 파티 판매 글이 등록됐어요
@@ -265,7 +266,7 @@ export default function WritePage() {
         </div>
 
         <div style={{ background: '#F0FDF4', borderRadius: 14, padding: '12px 16px', marginBottom: 14, display: 'flex', gap: 10, alignItems: 'center' }}>
-          <span style={{ fontSize: 20 }}>✅</span>
+          <CheckCircle2 size={20} color="#059669" strokeWidth={2.5} />
           <div>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#059669' }}>{successCount}개 글 등록 완료</div>
             <div style={{ fontSize: 11, color: '#6B7280' }}>동일한 계정 정보로 {successCount}개 상품에 일괄 설정돼요</div>
@@ -275,7 +276,7 @@ export default function WritePage() {
         {error && <div style={{ background: '#FFF0F0', borderRadius: 12, padding: '10px 14px', marginBottom: 12, fontSize: 12, color: '#EF4444' }}>{error}</div>}
 
         <div style={{ background: '#fff', borderRadius: 16, padding: 18, border: '1.5px solid #EDE9FE', boxShadow: '0 2px 12px rgba(167,139,250,0.08)', marginBottom: 14 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#1E1B4B', marginBottom: 14 }}>🔑 계정 정보</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#1E1B4B', marginBottom: 14, display:"flex", alignItems:"center", gap:8 }}><KeySquare size={16} color="#A78BFA" /> 계정 정보</div>
           <label style={labelStyle}>아이디 (이메일) *</label>
           <input value={keepAcct} onChange={e => setKeepAcct(e.target.value)} placeholder="example@email.com" style={inputStyle} />
           <label style={labelStyle}>비밀번호 *</label>
@@ -289,7 +290,7 @@ export default function WritePage() {
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={() => setStep('done')} style={{ flex: 1, ...btnStyle('#F3F0FF', '#7C3AED'), fontSize: 13 }}>나중에 설정</button>
           <button onClick={handleKeepAcct} disabled={submitting} style={{ flex: 2, ...btnStyle(submitting ? '#C4B5FD' : '#A78BFA', '#fff'), opacity: submitting ? 0.8 : 1 }}>
-            {submitting ? `설정 중 (${doneProductUsids.length}개)...` : `✅ ${successCount}개 일괄 설정`}
+            {submitting ? `설정 중 (${doneProductUsids.length}개)...` : `${successCount}개 일괄 설정`}
           </button>
         </div>
         <div style={{ height: 20 }} />
@@ -306,7 +307,7 @@ export default function WritePage() {
 
     return (
       <div style={{ padding: '20px 16px 0' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1E1B4B', margin: '0 0 16px' }}>⏳ 등록 중...</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1E1B4B', margin: '0 0 16px', display:"flex", alignItems:"center", gap:10 }}><Loader2 size={22} color="#A78BFA" style={{ animation:"spin 1s linear infinite" }} /> 등록 중...</h1>
 
         {/* 전체 진행률 바 */}
         <div style={{ background: '#fff', borderRadius: 16, padding: '16px', marginBottom: 14, border: '1.5px solid #EDE9FE' }}>
@@ -317,7 +318,7 @@ export default function WritePage() {
           <div style={{ background: '#EDE9FE', borderRadius: 8, height: 8, overflow: 'hidden' }}>
             <div style={{ background: 'linear-gradient(90deg, #A78BFA, #818CF8)', height: '100%', width: `${pct}%`, borderRadius: 8, transition: 'width 0.4s ease' }} />
           </div>
-          {errors > 0 && <div style={{ fontSize: 11, color: '#EF4444', marginTop: 6 }}>⚠️ {errors}개 실패</div>}
+          {errors > 0 && <div style={{ fontSize: 11, color: '#EF4444', marginTop: 6, display:'flex', alignItems:'center', gap:4 }}><AlertTriangle size={11} />{errors}개 실패</div>}
         </div>
 
         {/* 아이템별 상태 */}
@@ -333,7 +334,7 @@ export default function WritePage() {
                 display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
                 background: item.status === 'done' ? '#F0FDF4' : item.status === 'error' ? '#FFF0F0' : item.status === 'running' ? '#EDE9FE' : '#F8F6FF',
               }}>
-                {item.status === 'done' ? '✅' : item.status === 'error' ? '❌' : item.status === 'running' ? '⏳' : '⬜'}
+                {item.status === 'done' ? <Check size={16} color='#059669' strokeWidth={3} /> : item.status === 'error' ? <X size={16} color='#EF4444' strokeWidth={3} /> : item.status === 'running' ? <Loader2 size={16} color='#A78BFA' style={{ animation:'spin 1s linear infinite' }} /> : <Square size={16} color='#C4B5FD' />}
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#1E1B4B' }}>
@@ -449,7 +450,7 @@ export default function WritePage() {
                   {priceInfo.rank}위
                 </div>
                 <span style={{ fontSize: 12, color: '#6B7280' }}>/ {priceInfo.total}개 중</span>
-                {priceInfo.rank === 1 && <span style={{ fontSize: 12, color: '#059669', fontWeight: 700 }}>🏆 최저가!</span>}
+                {priceInfo.rank === 1 && <span style={{ fontSize: 12, color: '#059669', fontWeight: 700 }}><Trophy size={12} style={{ marginRight:3 }} />최저가!</span>}
                 {priceInfo.rank > 5 && <span style={{ fontSize: 11, color: '#9CA3AF' }}>가격을 낮춰보세요</span>}
               </div>
             )}
