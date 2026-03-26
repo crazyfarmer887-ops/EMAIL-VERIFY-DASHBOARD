@@ -4,9 +4,10 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 import tailwind from "@tailwindcss/vite"
 import path from "path";
 import runableAnalyticsPlugin from "./vite/plugins/runable-analytics-plugin";
+import imapPlugin from "./vite/plugins/imap-plugin";
 
 export default defineConfig({
-	plugins: [react(), runableAnalyticsPlugin(), cloudflare(), tailwind()],
+	plugins: [react(), runableAnalyticsPlugin(), imapPlugin(), cloudflare(), tailwind()],
 	resolve: {
 		alias: {
 			"@": path.resolve(__dirname, "./src/web"),

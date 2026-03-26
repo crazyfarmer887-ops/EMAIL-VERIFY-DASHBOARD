@@ -46,6 +46,25 @@ app.get('/sl/aliases', async (c) => {
   } catch (e: any) { return c.json({ error: e.message }, 500); }
 });
 
+// SimpleLogin - 특정 별칭 상세
+app.get('/sl/aliases/:id', async (c) => {
+  const { id } = c.req.param();
+  const cacheKey = `alias_${id}`;
+  const cached = getCached(cacheKey, ALIAS_TTL);
+  if (cached) return c.json({ ...cached, _cached: true });
+  try {
+    const res = await fetch(`${SL_API}/aliases/${id}`, { headers: slHeaders() });
+    if (res.status === 429) {
+      const c2 = getCached(cacheKey, Infinity);
+      if (c2) return c.json({ ...c2, _cached: true, _rate_limited: true });
+      return c.json({ error: 'API 요청 한도 초과' }, 429);
+    }
+    const data = await res.json() as any;
+    if (!data.error) setCached(cacheKey, data);
+    return c.json(data);
+  } catch (e: any) { return c.json({ error: e.message }, 500); }
+});
+
 // SimpleLogin - 특정 별칭의 활동
 app.get('/sl/aliases/:id/activities', async (c) => {
   const { id } = c.req.param();
@@ -435,4 +454,21 @@ app.post('/post/keepAcct', async (c) => {
 });
 
 app.get('/ping', (c) => c.json({ ok: true }));
+
+// IMAP 프록시 - 원본 이메일 HTML 조회
+app.get('/email/raw', async (c) => {
+  const alias = c.req.query('alias') || '';
+  const from  = c.req.query('from') || '';
+  const ts    = c.req.query('ts') || '';
+  if (!ts) return c.json({ error: 'ts 파라미터 필요' }, 400);
+  try {
+    const url = `http://localhost:6932/email?alias=${encodeURIComponent(alias)}&from=${encodeURIComponent(from)}&ts=${ts}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return c.json(data, res.status as any);
+  } catch {
+    return c.json({ error: 'IMAP 서버 연결 실패. Gmail 앱 비밀번호를 확인해주세요.' }, 503);
+  }
+});
+
 export default app;
