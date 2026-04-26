@@ -1,8 +1,9 @@
+import { apiPath } from '../lib/path';
 import { useState, useEffect, useRef } from "react";
 import {
   Mail, Inbox, ChevronRight, ChevronDown, RefreshCw,
-  AlertCircle, Loader2, Forward, Clock, Lock, Shield,
-  Eye, EyeOff, Settings, Check, X, KeyRound
+  AlertCircle, Loader2, Clock, Lock, Shield,
+  Eye, EyeOff, Settings, KeyRound
 } from "lucide-react";
 
 // ─── 핀 관련 상수 ──────────────────────────────────────────────
@@ -58,6 +59,51 @@ function emailToLabel(email: string): string {
   }
   // 변환 안 되면 원본 표시 (짧게)
   return local.length > 18 ? local.slice(0, 16) + '..' : local;
+}
+
+// ─── 카테고리 정의 ──────────────────────────────────────────────
+const CATEGORIES = [
+  { key: 'all',     label: '전체',    color: '#7C3AED', bg: '#EDE9FE',  emoji: '📬' },
+  { key: 'netflix', label: '넷플릭스', color: '#E50914', bg: '#FFF0F0',  emoji: '🎬' },
+  { key: 'disney',  label: '디즈니+',  color: '#1A3E8C', bg: '#EEF3FF',  emoji: '✨' },
+  { key: 'wavve',   label: '웨이브',   color: '#006BE9', bg: '#EEF5FF',  emoji: '🌊' },
+  { key: 'tving',   label: '티빙',     color: '#FF153C', bg: '#FFF0F3',  emoji: '📺' },
+  { key: 'watcha',  label: '왓챠',     color: '#FF4B84', bg: '#FFF0F6',  emoji: '🎞️' },
+  { key: 'coupang', label: '쿠팡플레이',color: '#E8343B', bg: '#FFF0F0',  emoji: '🛒' },
+  { key: 'laftel',  label: '라프텔',   color: '#6B4FBB', bg: '#F3EEFF',  emoji: '🌸' },
+  { key: 'youtube', label: '유튜브',   color: '#FF0000', bg: '#FFF0F0',  emoji: '▶️' },
+  { key: 'apple',   label: 'Apple',   color: '#333',    bg: '#F5F5F5',  emoji: '🍎' },
+  { key: 'prime',   label: 'Prime',   color: '#00A8E0', bg: '#EEF9FF',  emoji: '📦' },
+  { key: 'other',   label: '기타',     color: '#6B7280', bg: '#F3F4F6',  emoji: '📧' },
+] as const;
+
+type CategoryKey = typeof CATEGORIES[number]['key'];
+
+function getCategoryKey(email: string): CategoryKey {
+  const e = email.toLowerCase();
+  for (const cat of CATEGORIES) {
+    if (cat.key === 'all' || cat.key === 'other') continue;
+    if (e.includes(cat.key)) return cat.key;
+  }
+  return 'other';
+}
+
+// ─── 카테고리 정렬 순서 ──────────────────────────────────────────
+const CATEGORY_ORDER = ['netflix', 'disney', 'wavve', 'tving', 'watcha', 'coupang', 'laftel', 'youtube', 'google', 'apple', 'amazon', 'prime'];
+
+function getCategoryRank(email: string): number {
+  const e = email.toLowerCase();
+  const idx = CATEGORY_ORDER.findIndex(k => e.includes(k));
+  return idx === -1 ? CATEGORY_ORDER.length : idx;
+}
+
+function sortByCategory(aliases: Alias[]): Alias[] {
+  return [...aliases].sort((a, b) => {
+    const ra = getCategoryRank(a.email);
+    const rb = getCategoryRank(b.email);
+    if (ra !== rb) return ra - rb;
+    return b.nb_forward - a.nb_forward;
+  });
 }
 
 // ─── OTT 감지 ──────────────────────────────────────────────────
@@ -245,6 +291,9 @@ export default function MailPage() {
   const [showPinSetup, setShowPinSetup] = useState(false);
   const [showPinChange, setShowPinChange] = useState(false);
 
+  // ─ 카테고리 필터
+  const [selectedCat, setSelectedCat] = useState<CategoryKey>('all');
+
   // ─ 데이터
   const [aliases, setAliases] = useState<Alias[]>([]);
   const [loading, setLoading] = useState(false);
@@ -259,14 +308,13 @@ export default function MailPage() {
   const fetchAliases = async (force = false) => {
     setLoading(true); setError(null); setIsRateLimited(false);
     try {
-      const res = await fetch(`/api/sl/aliases?page=0${force ? '&force=1' : ''}`);
+      const res = await fetch(apiPath(`/sl/aliases?page=0${force ? '&force=1' : ''}`));
       const data = await res.json() as any;
       if (res.status === 429 || data._rate_limited) {
         setIsRateLimited(true);
         if (data.aliases?.length) {
           // 만료 캐시라도 보여줌
-          const sorted = data.aliases.sort((a: Alias, b: Alias) => b.nb_forward - a.nb_forward);
-          setAliases(sorted);
+          setAliases(sortByCategory(data.aliases));
           setIsCached(true);
         } else {
           setError('API 요청 한도 초과. 잠시 후 다시 시도해주세요. (약 1분 후 재시도)');
@@ -274,8 +322,7 @@ export default function MailPage() {
         return;
       }
       if (data.error) throw new Error(data.error);
-      const sorted = (data.aliases || []).sort((a: Alias, b: Alias) => b.nb_forward - a.nb_forward);
-      setAliases(sorted);
+      setAliases(sortByCategory(data.aliases || []));
       setIsCached(!!data._cached);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
@@ -289,7 +336,7 @@ export default function MailPage() {
     setOpenAlias(id);
     setActLoading(v => ({ ...v, [id]: true }));
     try {
-      const res = await fetch(`/api/sl/aliases/${id}/activities?page=0${force ? '&force=1' : ''}`);
+      const res = await fetch(apiPath(`/sl/aliases/${id}/activities?page=0${force ? '&force=1' : ''}`));
       const data = await res.json() as any;
       if (res.status === 429 || data._rate_limited) {
         // 기존 캐시가 있으면 유지, 없으면 빈 배열
@@ -305,8 +352,6 @@ export default function MailPage() {
   useEffect(() => {
     if (pinState === 'unlocked' || pinState === 'no_pin') fetchAliases();
   }, [pinState]);
-
-  const totalForwards = aliases.reduce((s, a) => s + a.nb_forward, 0);
 
   // ─── 핀 설정 화면 ──────────────────────────────────────────
   if (showPinSetup) {
@@ -342,6 +387,19 @@ export default function MailPage() {
   }
 
   // ─── 본문 ───────────────────────────────────────────────────
+  // 카테고리별 count 계산
+  const catCounts = CATEGORIES.reduce((acc, cat) => {
+    acc[cat.key] = cat.key === 'all'
+      ? aliases.length
+      : aliases.filter(a => getCategoryKey(a.email) === cat.key).length;
+    return acc;
+  }, {} as Record<string, number>);
+
+  // 현재 선택된 카테고리 필터링
+  const filteredAliases = selectedCat === 'all'
+    ? aliases
+    : aliases.filter(a => getCategoryKey(a.email) === selectedCat);
+
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', background: '#F8F6FF', paddingBottom: 24 }}>
       {/* 헤더 */}
@@ -352,11 +410,9 @@ export default function MailPage() {
             <p style={{ fontSize: 11, color: '#9CA3AF', margin: '3px 0 0' }}>SimpleLogin 별칭 · {aliases.length}개</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            {/* 설정 */}
             <button onClick={() => setShowSettings(v => !v)} style={{ background: showSettings ? '#EDE9FE' : '#F3F0FF', border: 'none', borderRadius: 10, padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
               <Settings size={17} color="#A78BFA" />
             </button>
-            {/* 새로고침 */}
             <button onClick={() => fetchAliases(true)} disabled={loading} style={{ background: isRateLimited ? '#FFF3E0' : '#EDE9FE', border: 'none', borderRadius: 10, padding: '8px 12px', cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: isRateLimited ? '#E65100' : '#7C3AED', fontWeight: 600, fontFamily: 'inherit', opacity: loading ? 0.7 : 1 }}>
               <RefreshCw size={13} style={loading ? { animation: 'spin 1s linear infinite' } : {}} />
               {isRateLimited ? '재시도' : '새로고침'}
@@ -364,83 +420,114 @@ export default function MailPage() {
           </div>
         </div>
 
-        {/* 설정 패널 */}
         {showSettings && (
           <div style={{ marginTop: 12, background: '#F8F6FF', borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#9CA3AF', marginBottom: 2 }}>🔒 핀 보안</div>
             {getStoredPin() ? (
               <>
-                <button onClick={() => { setShowPinChange(true); setShowSettings(false); }} style={settingBtn}>
-                  <KeyRound size={14} color="#A78BFA" /> 핀번호 변경
-                </button>
-                <button onClick={() => { removePin(); setPinState('no_pin'); setShowSettings(false); }} style={{ ...settingBtn, color: '#EF4444' }}>
-                  <Lock size={14} color="#EF4444" /> 핀번호 삭제
-                </button>
-                <button onClick={() => { localStorage.removeItem(PIN_UNLOCKED_KEY); setPinState('locked'); setShowSettings(false); }} style={settingBtn}>
-                  <Lock size={14} color="#A78BFA" /> 지금 잠그기
-                </button>
+                <button onClick={() => { setShowPinChange(true); setShowSettings(false); }} style={settingBtn}><KeyRound size={14} color="#A78BFA" /> 핀번호 변경</button>
+                <button onClick={() => { removePin(); setPinState('no_pin'); setShowSettings(false); }} style={{ ...settingBtn, color: '#EF4444' }}><Lock size={14} color="#EF4444" /> 핀번호 삭제</button>
+                <button onClick={() => { localStorage.removeItem(PIN_UNLOCKED_KEY); setPinState('locked'); setShowSettings(false); }} style={settingBtn}><Lock size={14} color="#A78BFA" /> 지금 잠그기</button>
               </>
             ) : (
-              <button onClick={() => { setShowPinSetup(true); setShowSettings(false); }} style={settingBtn}>
-                <Shield size={14} color="#A78BFA" /> 핀번호 설정하기
-              </button>
+              <button onClick={() => { setShowPinSetup(true); setShowSettings(false); }} style={settingBtn}><Shield size={14} color="#A78BFA" /> 핀번호 설정하기</button>
             )}
           </div>
         )}
       </div>
 
-      <div style={{ padding: '14px 14px 0' }}>
-        {/* 요약 배너 */}
-        {!loading && aliases.length > 0 && (
-          <div style={{
-            background: 'linear-gradient(135deg, #A78BFA 0%, #818CF8 100%)',
-            borderRadius: 18, padding: '14px 18px', marginBottom: 14, color: '#fff',
-            display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, textAlign: 'center',
-          }}>
-            {[
-              { label: '별칭', value: `${aliases.length}개` },
-              { label: '활성',  value: `${aliases.filter(a => a.enabled).length}개` },
-              { label: '총 수신', value: `${totalForwards}건` },
-            ].map(item => (
-              <div key={item.label} style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 10, padding: '8px 4px' }}>
-                <div style={{ fontSize: 15, fontWeight: 700 }}>{item.value}</div>
-                <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>{item.label}</div>
+      {/* ─── 카테고리 탭 바 ─── */}
+      <div style={{ background: '#fff', borderBottom: '1px solid #EDE9FE', overflowX: 'auto', display: 'flex', padding: '0 12px', gap: 2, scrollbarWidth: 'none' }}>
+        {CATEGORIES.map(cat => {
+          const count = catCounts[cat.key] ?? 0;
+          if (cat.key !== 'all' && cat.key !== 'other' && count === 0) return null;
+          const isActive = selectedCat === cat.key;
+          return (
+            <button
+              key={cat.key}
+              onClick={() => { setSelectedCat(cat.key); setOpenAlias(null); }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '10px 12px',
+                background: 'transparent',
+                border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                borderBottom: isActive ? `2px solid ${cat.color}` : '2px solid transparent',
+                color: isActive ? cat.color : '#9CA3AF',
+                fontWeight: isActive ? 700 : 500,
+                fontSize: 13,
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s',
+                flexShrink: 0,
+              }}
+            >
+              <span style={{ fontSize: 15 }}>{cat.emoji}</span>
+              <span>{cat.label}</span>
+              {count > 0 && (
+                <span style={{
+                  fontSize: 10, fontWeight: 700, minWidth: 18, height: 18,
+                  background: isActive ? cat.color : '#E5E7EB',
+                  color: isActive ? '#fff' : '#6B7280',
+                  borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '0 4px',
+                }}>
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ─── 본문 ─── */}
+      <div style={{ padding: '12px 12px 0' }}>
+          {/* Rate limit / 캐시 안내 */}
+          {isRateLimited && (
+            <div style={{ background: '#FFF3E0', borderRadius: 12, padding: '10px 14px', marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#E65100' }}>
+              <AlertCircle size={14} />
+              <span>{isCached ? '이전 데이터 표시 중. 1분 후 재시도해주세요.' : 'API 한도 초과. 잠시 후 재시도해주세요.'}</span>
+            </div>
+          )}
+          {!isRateLimited && isCached && (
+            <div style={{ background: '#F3F0FF', borderRadius: 10, padding: '8px 12px', marginBottom: 10, fontSize: 11, color: '#9CA3AF', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Clock size={11} /> 캐시된 데이터 (최대 5분)
+            </div>
+          )}
+          {error && (
+            <div style={{ background: '#FFF0F0', borderRadius: 12, padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#EF4444' }}>
+              <AlertCircle size={14} /> {error}
+            </div>
+          )}
+
+          {/* 카테고리 제목 */}
+          {!loading && (() => {
+            const cat = CATEGORIES.find(c => c.key === selectedCat)!;
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                <span style={{ fontSize: 14 }}>{cat.emoji}</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: cat.color }}>{cat.label}</span>
+                <span style={{ fontSize: 11, color: '#9CA3AF' }}>({filteredAliases.length}개)</span>
               </div>
-            ))}
-          </div>
-        )}
+            );
+          })()}
 
-        {/* Rate limit / 캐시 안내 */}
-        {isRateLimited && (
-          <div style={{ background: '#FFF3E0', borderRadius: 12, padding: '10px 14px', marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#E65100' }}>
-            <AlertCircle size={14} />
-            <span>API 요청 한도 초과 — {isCached ? '이전 데이터를 표시 중이에요. 1분 후 재시도해주세요.' : '잠시 후 재시도해주세요.'}</span>
-          </div>
-        )}
-        {!isRateLimited && isCached && (
-          <div style={{ background: '#F3F0FF', borderRadius: 10, padding: '8px 12px', marginBottom: 10, fontSize: 11, color: '#9CA3AF', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Clock size={11} /> 캐시된 데이터 (최대 5분)
-          </div>
-        )}
+          {/* 로딩 */}
+          {loading && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {[1,2,3,4].map(i => <div key={i} style={{ background: '#fff', borderRadius: 14, height: 68, animation: 'pulse 1.5s infinite', opacity: 0.5 }} />)}
+            </div>
+          )}
 
-        {/* 에러 */}
-        {error && (
-          <div style={{ background: '#FFF0F0', borderRadius: 12, padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#EF4444' }}>
-            <AlertCircle size={14} /> {error}
-          </div>
-        )}
+          {/* 별칭 목록 */}
+          {!loading && filteredAliases.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#C4B5FD', fontSize: 13 }}>
+              <Inbox size={32} color="#EDE9FE" style={{ display: 'block', margin: '0 auto 10px' }} />
+              이 카테고리에 별칭이 없어요
+            </div>
+          )}
 
-        {/* 로딩 */}
-        {loading && (
+          {!loading && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {[1,2,3,4].map(i => <div key={i} style={{ background: '#fff', borderRadius: 14, height: 72, animation: 'pulse 1.5s infinite', opacity: 0.5 }} />)}
-          </div>
-        )}
-
-        {/* 별칭 목록 */}
-        {!loading && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {aliases.map(alias => {
+            {filteredAliases.map(alias => {
               const label = emailToLabel(alias.email);
               const isOpen = openAlias === alias.id;
               const acts = activities[alias.id] || [];

@@ -1,26 +1,26 @@
 # Website
 
-React + Vite + Hono + Tailwind + Cloudflare Workers
+React + Vite + Hono + Tailwind + Node.js local server
 
 ## Project Structure
 
 - `src/web/` — React frontend: pages, components, styles, hooks
-- `src/api/` — Hono API server (`/api/*`), database schema and migrations
+- `src/api/` — Hono API server (`/api/*`)
+- `server.ts` — Node.js runtime that serves the built SPA and API locally
 - `public/` — Static assets (favicon, og-image, logo)
 
 ## Quick Start
 
 ```bash
 # Install dependencies
-bun install
+npm install
 
-# Generate types and run migrations
-bun cf-typegen
-bun db:generate
-bun db:migrate
+# Build and run locally
+npm run build
+npm run start
 
-# Start dev server
-bun dev
+# Dev mode with live reload
+npm run dev
 ```
 
 ## shadcn/ui

@@ -1,13 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { cloudflare } from "@cloudflare/vite-plugin";
-import tailwind from "@tailwindcss/vite"
+import tailwind from "@tailwindcss/vite";
 import path from "path";
-import runableAnalyticsPlugin from "./vite/plugins/runable-analytics-plugin";
-import imapPlugin from "./vite/plugins/imap-plugin";
+
+const basePath = process.env.VITE_BASE_PATH || process.env.APP_BASE_PATH || "/email/";
 
 export default defineConfig({
-	plugins: [react(), runableAnalyticsPlugin(), imapPlugin(), cloudflare(), tailwind()],
+	base: basePath,
+	plugins: [react(), tailwind()],
 	resolve: {
 		alias: {
 			"@": path.resolve(__dirname, "./src/web"),

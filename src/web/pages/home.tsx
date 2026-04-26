@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { CATEGORIES } from "../lib/constants";
+import { apiPath } from "../lib/path";
 import { RefreshCw, ChevronRight, User } from "lucide-react";
 
 interface CategorySummary {
@@ -17,7 +18,7 @@ export default function HomePage() {
 
   const fetchData = async () => {
     setLoading(true);
-    try { const res = await fetch('/api/prices'); setData(await res.json()); }
+    try { const res = await fetch(apiPath('/prices')); setData(await res.json()); }
     catch (e) { console.error(e); }
     finally { setLoading(false); }
   };

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CATEGORIES } from "../lib/constants";
+import { apiPath } from "../lib/path";
 import { RefreshCw, KeyRound, Mail, ChevronDown, ChevronRight, TrendingUp, Loader2, AlertCircle, ExternalLink } from "lucide-react";
 
 interface Member {
@@ -26,9 +27,16 @@ const STATUS_BADGE: Record<string, { label: string; color: string; bg: string }>
   UsingNearExpiration:         { label:'만료 임박',  color:'#D97706', bg:'#FFFBEB' },
   OnSale:                      { label:'판매 중',   color:'#059669', bg:'#ECFDF5' },
   Delivered:                   { label:'전달 완료',  color:'#2563EB', bg:'#EFF6FF' },
+  DeliveredAndCheckPrepaid:    { label:'구매 확정',  color:'#8B5CF6', bg:'#FAF5FF' },
   Delivering:                  { label:'전달 중',   color:'#0891B2', bg:'#ECFEFF' },
   Reserved:                    { label:'예약됨',    color:'#6366F1', bg:'#EEF2FF' },
   LendingAcceptanceWaiting:    { label:'수락 대기',  color:'#D97706', bg:'#FFFBEB' },
+  TradingNegotiationWaiting:   { label:'계정확인중', color:'#3B82F6', bg:'#EFF6FF' },
+  SellerDirectDelivery:       { label:'판매자 직접 전달', color:'#F59E0B', bg:'#FEF3C7' },
+  DirectDelivery:              { label:'직접 전달',    color:'#F59E0B', bg:'#FEF3C7' },
+  DirectTransfer:              { label:'직접 이전',    color:'#F59E0B', bg:'#FEF3C7' },
+  ManualDelivery:              { label:'수동 전달',    color:'#F59E0B', bg:'#FEF3C7' },
+  TransferAccepted:            { label:'전달 수락',    color:'#F59E0B', bg:'#FEF3C7' },
   NormalFinished:              { label:'완료',      color:'#6B7280', bg:'#F3F4F6' },
   FinishedByBorrowerRequest:   { label:'중도 종료',  color:'#9CA3AF', bg:'#F9FAFB' },
   FinishedByLenderRequest:     { label:'중도 종료',  color:'#9CA3AF', bg:'#F9FAFB' },
@@ -60,8 +68,9 @@ export default function ManagePage() {
     if (!cs) return;
     setLoading(true); setError(null); setData(null);
     try {
-      const res = await fetch('/api/my/management', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ AWSALB:cs.AWSALB, AWSALBCORS:cs.AWSALBCORS, JSESSIONID:cs.JSESSIONID }) });
+      const res = await fetch(apiPath('/my/management'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ AWSALB:cs.AWSALB, AWSALBCORS:cs.AWSALBCORS, JSESSIONID:cs.JSESSIONID }) });
       const json = await res.json() as any;
+      console.log("[MANAGE] API response:", json);
       if (!res.ok) setError(json.error);
       else { setData(json); if (json.services?.[0]) setOpenService(json.services[0].serviceType); }
     } catch (e: any) { setError(e.message); }

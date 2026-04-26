@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { KeyRound, PartyPopper, CheckCircle2, KeySquare, Loader2, AlertTriangle, Trophy, Info, PenLine, Check, X, Square, Clock } from "lucide-react";
+import { apiPath } from "../lib/path";
+import { KeyRound, PartyPopper, CheckCircle2, KeySquare, Loader2, AlertTriangle, Trophy, Check, X, Square, Mail, Link } from "lucide-react";
+
+interface SlAlias { id: number; email: string; enabled: boolean; pin?: string | null; hasPin?: boolean; }
 
 const STORAGE_KEY = 'graytag_cookies_v2';
 interface CookieSet { id: string; label: string; AWSALB: string; AWSALBCORS: string; JSESSIONID: string; }
@@ -50,27 +53,28 @@ export default function WritePage() {
 !!! 1 1 1 원칙을 꼭 지켜주세요 !!!
 1인 1기기 1계정 원칙이며 어길 시 약정에 의거 위약금 부과되니 인지바랍니다.`;
 
-  const makeDefaultKeepMemo = () => `프로필 생성하시고 사용하셔야 하며,
-본명의 가운데 이름을 별표 처리하신 뒤 만드시면 됩니다.
-예: 홍길동 -> 홍*동
-미준수시 그레이태그 약정에 의거 거래 취소로 인한 위약금 부과되니 꼭 준수 부탁드립니다.
+  const makeDefaultKeepMemo = (emailId?: number|string, pin?: string) => {
+    const eid = emailId || '{EMAIL_ID}';
+    const p = pin || '{PIN}';
+    return `✅ 아래 내용 꼭 읽어주세요! 로그인 관련 내용입니다!! ✅
+로그인 시도 간 필요한 이메일 코드는 아래 사이트에서 언제든지 셀프인증 가능합니다!
+https://email-verify.xyz/email/mail/${eid}
+사이트에서 필요한 핀번호는 : ${p}입니다!
 
-[ 로그인 관련 ]
-아이디 비밀번호 입력시 자동으로 로그인 완료되며,
-만약 로그인 시도간 이메일 인증 필요시
-구매 이후 생긴 채팅방에
-본인의 이메일을 남겨주시면 앞으로 인증코드 메일을 보내주신 이메일로 자동 전송되도록 설정 도와드리고 있습니다.
+프로필을 만드실 때, 본명에서 가운데 글자를 별(*)로 가려주세요!
+만약, 특수기호 사용이 불가할 경우 본명으로 설정 부탁드립니다! 예)홍길동 또는 홍*동`;
+  };
 
-!!! 1 1 1 원칙을 꼭 지켜주세요 !!!
-1인 1기기 1계정 원칙이며 어길 시 약정에 의거 위약금 부과되니 인지바랍니다.`;
-
-  const currentSvcLabel = SERVICES.find(s => s.key === service)?.label || '';
   const [description, setDescription] = useState(() => makeDefaultDesc(SERVICES[0].label));
 
   // 계정 전달
   const [keepAcct, setKeepAcct] = useState('');
   const [keepPasswd, setKeepPasswd] = useState('');
   const [keepMemo, setKeepMemo] = useState(() => makeDefaultKeepMemo());
+  const [slAliases, setSlAliases] = useState<SlAlias[]>([]);
+  const [slLoading, setSlLoading] = useState(false);
+  const [selectedAliasId, setSelectedAliasId] = useState<number | null>(null);
+  const [keepPin, setKeepPin] = useState('');
 
   // 진행 상태
   const [progressList, setProgressList] = useState<ProgressItem[]>([]);
@@ -149,7 +153,7 @@ export default function WritePage() {
       price: String(parseInt(price.replace(/,/g,''))),
       name: `${svc.label} 파티 공유`,
       sellingGuide: description,
-      ...(service === 'netflix' ? { netflixSeatCount: '5', productCountryString: 'Domestic' } : {}),
+      ...(service === 'netflix' ? { netflixSeatCount: '5', productCountryString: 'Domestic' } : service === 'tving' || service === 'wavve' ? { netflixSeatCount: '4' } : {}),
     };
 
     const results: string[] = [];
@@ -159,7 +163,7 @@ export default function WritePage() {
       setProgressList(prev => prev.map(p => p.index === i+1 ? { ...p, status: 'running' } : p));
 
       try {
-        const res = await fetch('/api/post/create', {
+        const res = await fetch(apiPath('/post/create'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ AWSALB: cs.AWSALB, AWSALBCORS: cs.AWSALBCORS, JSESSIONID: cs.JSESSIONID, productModel }),
@@ -178,8 +182,15 @@ export default function WritePage() {
     }
 
     setDoneProductUsids(results);
-    // 성공한 게 있으면 계정 전달로 이동
+    // 성공한 게 있으면 이메일 별칭 목록 로드 + 계정 전달로 이동
     if (results.length > 0) {
+      setSlLoading(true);
+      try {
+        const aliasRes = await fetch(apiPath('/sl/aliases?page=0'), { credentials: 'include' });
+        const aliasJson = await aliasRes.json() as any;
+        setSlAliases((aliasJson.aliases || []).filter((a: SlAlias) => a.enabled));
+      } catch {}
+      setSlLoading(false);
       setTimeout(() => setStep('keepAcct'), 500);
     }
   };
@@ -194,7 +205,7 @@ export default function WritePage() {
     let successCount = 0;
     for (const usid of doneProductUsids) {
       try {
-        const res = await fetch('/api/post/keepAcct', {
+        const res = await fetch(apiPath('/post/keepAcct'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ AWSALB: cs.AWSALB, AWSALBCORS: cs.AWSALBCORS, JSESSIONID: cs.JSESSIONID, productUsid: usid, keepAcct, keepPasswd, keepMemo }),
@@ -215,6 +226,7 @@ export default function WritePage() {
     setDescription(makeDefaultDesc(SERVICES[0].label));
     setKeepAcct(''); setKeepPasswd('');
     setKeepMemo(makeDefaultKeepMemo());
+    setKeepPin(''); setSelectedAliasId(null); setSlAliases([]);
   };
 
   // ── 쿠키 없음 ──────────────────────────────────────────────
@@ -275,16 +287,59 @@ export default function WritePage() {
 
         {error && <div style={{ background: '#FFF0F0', borderRadius: 12, padding: '10px 14px', marginBottom: 12, fontSize: 12, color: '#EF4444' }}>{error}</div>}
 
+        {/* 이메일 별칭 선택 */}
+        {slAliases.length > 0 && (
+          <div style={{ background: '#fff', borderRadius: 16, padding: 16, border: '1.5px solid #EDE9FE', boxShadow: '0 2px 12px rgba(167,139,250,0.08)', marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#1E1B4B', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Link size={14} color="#A78BFA" /> 이메일 연동 (클릭하여 선택)
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflowY: 'auto' }}>
+              {slAliases.map(alias => (
+                <button key={alias.id} onClick={() => {
+                  setSelectedAliasId(alias.id);
+                  setKeepAcct(alias.email);
+                  const autoPin = alias.pin || keepPin.trim();
+                  if (autoPin) {
+                    setKeepPin(autoPin);
+                    setKeepMemo(makeDefaultKeepMemo(alias.id, autoPin));
+                  } else {
+                    setKeepMemo(makeDefaultKeepMemo(alias.id));
+                  }
+                }} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+                  borderRadius: 10, border: `1.5px solid ${selectedAliasId === alias.id ? '#A78BFA' : '#EDE9FE'}`,
+                  background: selectedAliasId === alias.id ? '#F5F3FF' : '#F8F6FF',
+                  cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', width: '100%',
+                }}>
+                  <Mail size={14} color={selectedAliasId === alias.id ? '#A78BFA' : '#9CA3AF'} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: selectedAliasId === alias.id ? '#7C3AED' : '#1E1B4B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {alias.email}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 1 }}>
+                      <span style={{ fontSize: 10, color: '#9CA3AF' }}>ID: {alias.id}</span>
+                      {alias.pin && <span style={{ fontSize: 9, fontWeight: 700, color: '#059669', background: '#F0FDF4', borderRadius: 4, padding: '1px 5px' }}>PIN: {alias.pin}</span>}
+                      {!alias.pin && <span style={{ fontSize: 9, color: '#D97706', background: '#FFFBEB', borderRadius: 4, padding: '1px 5px' }}>PIN 미설정</span>}
+                    </div>
+                  </div>
+                  {selectedAliasId === alias.id && <Check size={14} color="#A78BFA" strokeWidth={3} />}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {slLoading && <div style={{ fontSize: 12, color: '#C4B5FD', marginBottom: 12 }}>이메일 목록 로딩 중...</div>}
+
         <div style={{ background: '#fff', borderRadius: 16, padding: 18, border: '1.5px solid #EDE9FE', boxShadow: '0 2px 12px rgba(167,139,250,0.08)', marginBottom: 14 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#1E1B4B', marginBottom: 14, display:"flex", alignItems:"center", gap:8 }}><KeySquare size={16} color="#A78BFA" /> 계정 정보</div>
           <label style={labelStyle}>아이디 (이메일) *</label>
           <input value={keepAcct} onChange={e => setKeepAcct(e.target.value)} placeholder="example@email.com" style={inputStyle} />
           <label style={labelStyle}>비밀번호 *</label>
           <input value={keepPasswd} onChange={e => setKeepPasswd(e.target.value)} placeholder="비밀번호" style={inputStyle} />
-          <label style={labelStyle}>추가 안내 (선택)</label>
+          <label style={labelStyle}>추가 안내</label>
           <textarea value={keepMemo} onChange={e => setKeepMemo(e.target.value)}
-            placeholder={'예: 인증코드는 채팅방으로 요청해주세요.\n본인 프로필만 사용 부탁드립니다.'}
-            style={{ ...inputStyle, height: 85, resize: 'vertical' }} />
+            placeholder={'자동으로 채워집니다'}
+            style={{ ...inputStyle, height: 120, resize: 'vertical', fontSize: 12 }} />
         </div>
 
         <div style={{ display: 'flex', gap: 10 }}>

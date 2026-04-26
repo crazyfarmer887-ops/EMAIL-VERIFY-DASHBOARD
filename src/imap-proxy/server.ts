@@ -145,9 +145,17 @@ async function fetchEmail(aliasEmail: string, originalFrom: string, timestampSec
   await client.connect();
   const lock = await client.getMailboxLock('INBOX');
   try {
-    const after = new Date((timestampSec - 3600 * 3) * 1000);
-    const before = new Date((timestampSec + 3600 * 3) * 1000);
-    const uids = await client.search({ since: after, before });
+    // 좁은 시간 윈도우 ±10분으로 동일 발신자 연속 이메일을 timestamp 기준으로 구분
+    const after = new Date((timestampSec - 60 * 10) * 1000);
+    const before = new Date((timestampSec + 60 * 10) * 1000);
+    let uids = await client.search({ since: after, before });
+
+    // ±10분 내 없으면 ±1시간으로 fallback
+    if (!uids.length) {
+      const after2 = new Date((timestampSec - 3600) * 1000);
+      const before2 = new Date((timestampSec + 3600) * 1000);
+      uids = await client.search({ since: after2, before2 });
+    }
     if (!uids.length) return null;
 
     const fromEmailMatch = originalFrom.match(/<([^>]+)>/);
@@ -155,6 +163,7 @@ async function fetchEmail(aliasEmail: string, originalFrom: string, timestampSec
 
     let bestUid: number | null = null;
     let bestScore = -1;
+    let bestTimeDiff = Infinity;
 
     // fetchOne으로 각 uid의 헤더 확인
     for (const uid of uids) {
@@ -168,6 +177,11 @@ async function fetchEmail(aliasEmail: string, originalFrom: string, timestampSec
       const slEnvTo = (h.match(/x-simplelogin-envelope-to:\s*([^\r\n]+)/i)?.[1] || '').toLowerCase().trim();
       const slOrigFrom = (h.match(/x-simplelogin-original-from:\s*([^\r\n]+)/i)?.[1] || '').toLowerCase().trim();
 
+      // Date 헤더로 실제 수신 시각 파싱 → timestamp 가장 가까운 메일 선택
+      const dateHeader = (h.match(/^date:\s*([^\r\n]+)/im)?.[1] || '').trim();
+      const mailTs = dateHeader ? Math.floor(new Date(dateHeader).getTime() / 1000) : 0;
+      const timeDiff = mailTs > 0 ? Math.abs(mailTs - timestampSec) : Infinity;
+
       let score = 1; // is Forward
       if (aliasEmail && slEnvTo.includes(aliasEmail.toLowerCase())) score += 10;
       if (fromAddr) {
@@ -176,9 +190,13 @@ async function fetchEmail(aliasEmail: string, originalFrom: string, timestampSec
         if (slOrigFrom.includes(fromUser)) score += 5;
         if (slOrigFrom.includes(fromDomain)) score += 3;
       }
-      if (score > bestScore) { bestScore = score; bestUid = uid; }
-      // alias 정확히 매칭되면 바로 사용
-      if (score >= 11) break;
+
+      // 동점이면 timestamp 더 가까운 것 선택
+      if (score > bestScore || (score === bestScore && timeDiff < bestTimeDiff)) {
+        bestScore = score;
+        bestUid = uid;
+        bestTimeDiff = timeDiff;
+      }
     }
 
     if (bestUid === null || bestScore < 2) return null;

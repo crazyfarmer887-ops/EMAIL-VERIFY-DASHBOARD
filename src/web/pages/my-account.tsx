@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Cookie, Plus, X, Trash2, Search, AlertCircle, ExternalLink, ChevronRight, Loader2, CheckCircle2, KeyRound, ClipboardList, Pencil } from "lucide-react";
+import { apiPath } from "../lib/path";
+import { Cookie, Plus, X, Trash2, Search, AlertCircle, ExternalLink, Loader2, CheckCircle2, KeyRound, ClipboardList, Pencil } from "lucide-react";
 
 interface CookieSet { id: string; label: string; AWSALB: string; AWSALBCORS: string; JSESSIONID: string; }
 interface Deal {
@@ -64,7 +65,7 @@ export default function MyAccountPage() {
     setResults(r => ({ ...r, [cs.id]: { loading: true, data: null, error: null } }));
     setTabs(t => ({ ...t, [cs.id]: 'lender' }));
     try {
-      const res = await fetch('/api/my/accounts', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ AWSALB:cs.AWSALB, AWSALBCORS:cs.AWSALBCORS, JSESSIONID:cs.JSESSIONID }) });
+      const res = await fetch(apiPath('/my/accounts'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ AWSALB:cs.AWSALB, AWSALBCORS:cs.AWSALBCORS, JSESSIONID:cs.JSESSIONID }) });
       const json = await res.json() as any;
       if (!res.ok) setResults(r => ({ ...r, [cs.id]: { loading: false, data: null, error: json.error, code: json.code } }));
       else setResults(r => ({ ...r, [cs.id]: { loading: false, data: json, error: null } }));
