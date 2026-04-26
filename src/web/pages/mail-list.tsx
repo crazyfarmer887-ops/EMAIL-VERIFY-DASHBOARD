@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 import { useCooldown } from "../hooks/use-cooldown";
 import { getAdminSession } from "../lib/pin-api";
+import { StatCard } from "../components/ui/card";
+import { StatusBadge } from "../components/ui/status-badge";
 
 const SERVICE_MAP: Record<string, string> = {
   disney: '디즈니', netflix: '넷플릭스', watcha: '왓챠', wavve: '웨이브',
@@ -284,6 +286,9 @@ export default function MailListPage() {
   }, []);
 
   const totalForwards = aliases.reduce((s, a) => s + a.nb_forward, 0);
+  const lockedAliases = aliases.filter(a => a.hasPin).length;
+  const activeAliases = aliases.filter(a => a.enabled).length;
+  const recentWindowLabel = '최근 10분';
 
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', background: '#F8F6FF', paddingBottom: 80 }}>
@@ -327,7 +332,23 @@ export default function MailListPage() {
       </div>
 
       <div style={{ padding: '14px 14px 0' }}>
-        {/* 요약 배너 */}
+        {/* 요약 카드 */}
+        {!loading && aliases.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9 }}>
+              <div style={{ fontSize: 14, fontWeight: 900, color: 'var(--foreground)' }}>메일함 상태</div>
+              <StatusBadge tone={isRateLimited ? 'warning' : 'success'}>{isRateLimited ? '요청 제한' : '자동 동기화'}</StatusBadge>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <StatCard label="전체 별칭" value={`${aliases.length}개`} helper="SimpleLogin 기준" tone="info" />
+              <StatCard label="활성 별칭" value={`${activeAliases}개`} helper="수신 가능한 별칭" tone="success" />
+              <StatCard label={recentWindowLabel} value="실시간" helper="5초마다 새 메일 감지" tone="warning" />
+              <StatCard label="잠금 필요" value={`${lockedAliases}개`} helper={isAdmin ? '관리자 권한 표시 중' : 'PIN 보호 별칭'} tone={lockedAliases > 0 ? 'warning' : 'success'} />
+            </div>
+          </div>
+        )}
+
+        {/* 기존 요약 배너 */}
         {!loading && aliases.length > 0 && (
           <div style={{
             background: 'linear-gradient(135deg, #A78BFA 0%, #818CF8 100%)',

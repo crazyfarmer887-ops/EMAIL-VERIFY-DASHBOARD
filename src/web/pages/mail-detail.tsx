@@ -219,6 +219,7 @@ function PinInput({
           </div>
           <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1E1B4B', margin: 0 }}>핀번호 입력</h2>
           <p style={{ fontSize: 13, color: '#9CA3AF', margin: '6px 0 0' }}>메일을 보려면 핀번호를 입력해주세요</p>
+          <p style={{ fontSize: 11, color: '#7C3AED', background: '#F3F0FF', borderRadius: 999, padding: '5px 10px', margin: '10px auto 0', display: 'inline-block', fontWeight: 700 }}>이 별칭만 30분 동안 열림</p>
         </div>
 
         <div style={{ position: 'relative', marginBottom: 8 }}>

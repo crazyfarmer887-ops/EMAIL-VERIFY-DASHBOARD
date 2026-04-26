@@ -234,6 +234,7 @@ export default function AdminPage() {
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#1E1B4B", margin: 0 }}>관리자 PIN 관리</h1>
           <p style={{ fontSize: 12, color: "#9CA3AF", margin: "4px 0 0" }}>외부 사용자는 이메일 상세 화면에서 기존처럼 PIN을 입력해 접근해요</p>
+          <p style={{ fontSize: 11, color: "#059669", margin: "6px 0 0", fontWeight: 800 }}>관리자 세션 활성 · PIN 관리 권한 사용 중</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={loadAliases} disabled={loadingAliases} style={{ border: "none", background: "#EDE9FE", color: "#7C3AED", borderRadius: 10, padding: "9px 12px", fontWeight: 600, cursor: loadingAliases ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
