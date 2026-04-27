@@ -7,6 +7,7 @@ import { fetchRawEmail } from './email/raw-email.ts';
 import { getSubjectList, getEmailList, getEmailByUid, getLatestEmailReceivedAt } from './email/email-store.ts';
 import { sendTelegramAlert } from './alerts/telegram.ts';
 import { extractAuthCode } from '../lib/auth-code-extractor.ts';
+import { fetchAllSimpleLoginAliases } from './simplelogin-aliases.ts';
 
 function loadEnvFile() {
   const envPath = resolve(process.cwd(), '.env');
@@ -521,9 +522,10 @@ app.delete('/admin/pins/:id', (c) => {
 
 // SimpleLogin - 별칭 목록
 app.get('/sl/aliases', async (c) => {
-  const page = c.req.query('page') || '0';
+  const page = Number(c.req.query('page') || '0');
   const force = c.req.query('force') === '1';
-  const cacheKey = `aliases_${page}`;
+  const all = c.req.query('all') !== '0';
+  const cacheKey = all ? `aliases_all_${page}` : `aliases_${page}`;
 
   if (!force) {
     const cached = getCached(cacheKey, ALIAS_TTL);
@@ -536,8 +538,22 @@ app.get('/sl/aliases', async (c) => {
   }
 
   try {
-    const res = await fetch(`${SL_API}/aliases?page_id=${page}`, { headers: slHeaders() });
-    if (res.status === 429) {
+    const fetchAliasPage = async (pageId: number) => {
+      const res = await fetch(`${SL_API}/aliases?page_id=${pageId}`, { headers: slHeaders() });
+      if (res.status === 429) throw new Error('RATE_LIMIT');
+      return await res.json() as any;
+    };
+    const data = all
+      ? await fetchAllSimpleLoginAliases(fetchAliasPage, { startPage: Number.isFinite(page) ? page : 0 })
+      : await fetchAliasPage(Number.isFinite(page) ? page : 0);
+
+    if (!data.error) setCached(cacheKey, data);
+    const aliases = Array.isArray(data.aliases)
+      ? data.aliases.map(aliasWithPinStatus)
+      : data.aliases;
+    return c.json({ ...data, aliases });
+  } catch (e: any) {
+    if (e?.message === 'RATE_LIMIT') {
       const cached = getCached(cacheKey, Infinity); // rate limit 시 만료된 캐시라도 반환
       if (cached) {
         const aliases = Array.isArray(cached.aliases)
@@ -547,13 +563,8 @@ app.get('/sl/aliases', async (c) => {
       }
       return c.json({ error: 'API 요청 한도 초과. 잠시 후 다시 시도해주세요.', aliases: [] }, 429);
     }
-    const data = await res.json() as any;
-    if (!data.error) setCached(cacheKey, data);
-    const aliases = Array.isArray(data.aliases)
-      ? data.aliases.map(aliasWithPinStatus)
-      : data.aliases;
-    return c.json({ ...data, aliases });
-  } catch (e: any) { return c.json({ error: e.message }, 500); }
+    return c.json({ error: e.message }, 500);
+  }
 });
 
 // SimpleLogin - 특정 별칭 상세
