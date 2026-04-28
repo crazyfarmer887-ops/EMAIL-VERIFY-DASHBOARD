@@ -106,6 +106,24 @@ test('email list for a PIN-protected alias is rejected without server-side unloc
   assert.equal(queries, 0, 'must reject before querying email contents');
 });
 
+test('email list accepts an admin session without alias PIN headers', async () => {
+  const cookie = await loginAsAdmin();
+  queries = 0;
+  const res = await app.request('/api/email/list?alias=locked%40example.com&limit=10', { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const data = await res.json() as any;
+  assert.equal(data.emails[0].uid, 555);
+  assert.equal(queries > 0, true);
+});
+
+test('email uid detail accepts an admin session without alias PIN headers', async () => {
+  const cookie = await loginAsAdmin();
+  const res = await app.request('/api/email/uid/555', { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const data = await res.json() as any;
+  assert.equal(data.aliasTo, 'locked@example.com');
+});
+
 test('email list accepts a valid alias-scoped unlock token', async () => {
   const verify = await app.request('/api/sl/aliases/101/pin/verify', {
     method: 'POST',

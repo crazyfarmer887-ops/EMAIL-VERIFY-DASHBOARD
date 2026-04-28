@@ -169,6 +169,7 @@ export default function MailListPage() {
   const [isRateLimited, setIsRateLimited] = useState(false);
   const [, setTick] = useState(0); // pin 상태 갱신용
   const [isAdmin, setIsAdmin] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState('전체');
   const cooldown = useCooldown(15_000); // 15초
 
   // auto-refresh 폴링
@@ -289,6 +290,10 @@ export default function MailListPage() {
   const lockedAliases = aliases.filter(a => a.hasPin).length;
   const activeAliases = aliases.filter(a => a.enabled).length;
   const recentWindowLabel = '최근 10분';
+  const serviceCategories = ['전체', ...Object.values(SERVICE_MAP)];
+  const categoryFilteredAliases = selectedCategory === '전체'
+    ? aliases
+    : aliases.filter(alias => emailToLabel(alias.email).startsWith(selectedCategory));
 
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', background: '#F8F6FF', paddingBottom: 80 }}>
@@ -368,6 +373,25 @@ export default function MailListPage() {
           </div>
         )}
 
+        {/* 카테고리 빠른 보기 */}
+        {!loading && aliases.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 900, color: '#1E1B4B', marginBottom: 7 }}>카테고리 빠른 보기</div>
+            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
+              {serviceCategories.map(category => {
+                const active = selectedCategory === category;
+                const count = category === '전체' ? aliases.length : aliases.filter(alias => emailToLabel(alias.email).startsWith(category)).length;
+                if (category !== '전체' && count === 0) return null;
+                return (
+                  <button key={category} onClick={() => setSelectedCategory(category)} style={{ flexShrink: 0, border: 'none', borderRadius: 999, padding: '7px 10px', background: active ? '#7C3AED' : '#fff', color: active ? '#fff' : '#7C3AED', fontSize: 11, fontWeight: 900, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 1px 6px rgba(124,58,237,0.10)' }}>
+                    {category} {count}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* 안내 배너 */}
         {!loading && !error && (
           <div style={{
@@ -427,13 +451,13 @@ export default function MailListPage() {
         {/* 별칭 목록 */}
         {!loading && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {aliases.length === 0 && !error && (
+            {categoryFilteredAliases.length === 0 && !error && (
               <div style={{ textAlign: 'center', padding: '40px 0', color: '#9CA3AF' }}>
                 <Inbox size={32} color="#E9E4FF" style={{ margin: '0 auto 10px', display: 'block' }} />
-                별칭이 없어요
+                {selectedCategory === '전체' ? '별칭이 없어요' : `${selectedCategory} 별칭이 없어요`}
               </div>
             )}
-            {aliases.map(alias => {
+            {categoryFilteredAliases.map(alias => {
               const label = emailToLabel(alias.email);
               const hasPin = !!alias.hasPin;
 

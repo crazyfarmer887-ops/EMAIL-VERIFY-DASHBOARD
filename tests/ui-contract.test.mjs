@@ -28,9 +28,14 @@ test('mailbox, pin detail, and admin screens expose clearer states', () => {
   const mailList = read('src/web/pages/mail-list.tsx');
   const mailDetail = read('src/web/pages/mail-detail.tsx');
   const admin = read('src/web/pages/admin.tsx');
+  assert.match(mailList, /카테고리 빠른 보기/);
+  assert.match(mailList, /categoryFilteredAliases/);
+  assert.match(mailList, /전체|넷플릭스|티빙|웨이브/);
   assert.match(mailList, /최근 10분/);
   assert.match(mailList, /잠금 필요/);
-  assert.match(mailDetail, /이 별칭만 30분/);
+  assert.match(mailDetail, /관리자는 PIN 없이 바로 열람/);
+  assert.match(mailDetail, /adminSession\.authenticated/);
+  assert.match(mailDetail, /setPinMode\('unlocked'\)/);
   assert.match(admin, /Gmail sync/);
   assert.match(admin, /관리자 세션/);
 });

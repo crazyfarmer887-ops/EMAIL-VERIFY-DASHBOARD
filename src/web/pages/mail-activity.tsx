@@ -8,6 +8,7 @@ import {
   Code, Eye, AlertCircle, RefreshCw,
 } from "lucide-react";
 import { getEmailAccessHeaders, getUnlockToken } from "../lib/pin-store";
+import { getAdminSession } from "../lib/pin-api";
 
 const SERVICE_MAP: Record<string, string> = {
   disney: "디즈니", netflix: "넷플릭스", watcha: "왓챠", wavve: "웨이브",
@@ -120,6 +121,13 @@ export default function MailActivityPage() {
     let cancelled = false;
     (async () => {
       try {
+        const adminSession = await getAdminSession();
+        if (cancelled) return;
+        if (adminSession.authenticated) {
+          setPinBlocked(false);
+          setPinChecked(true);
+          return;
+        }
         const res = await fetch(apiPath(`/sl/aliases/${aliasId}/pin/status`));
         const data = await res.json() as any;
         if (cancelled) return;
