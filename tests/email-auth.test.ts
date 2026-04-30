@@ -124,6 +124,31 @@ test('email uid detail accepts an admin session without alias PIN headers', asyn
   assert.equal(data.aliasTo, 'locked@example.com');
 });
 
+test('email APIs block account-information-change request emails after authorization', async () => {
+  const cookie = await loginAsAdmin();
+  const original = { subject: row.subject, html: row.html, text_body: row.text_body };
+  row.subject = '계정 정보 변경 요청';
+  row.text_body = '계정 정보 변경 요청을 완료하려면 링크를 누르세요.';
+  row.html = '<p>계정 정보 변경 요청</p>';
+  try {
+    const list = await app.request('/api/email/list?alias=locked%40example.com&limit=10', { headers: { cookie } });
+    assert.equal(list.status, 200);
+    const listData = await list.json() as any;
+    assert.equal(listData.blockedCount, 1);
+    assert.deepEqual(listData.emails, []);
+
+    const detail = await app.request('/api/email/uid/555', { headers: { cookie } });
+    assert.equal(detail.status, 451);
+    const detailData = await detail.json() as any;
+    assert.equal(detailData.blocked, true);
+    assert.equal(JSON.stringify(detailData).includes('계정 정보 변경 요청'), false);
+  } finally {
+    row.subject = original.subject;
+    row.html = original.html;
+    row.text_body = original.text_body;
+  }
+});
+
 test('email list accepts a valid alias-scoped unlock token', async () => {
   const verify = await app.request('/api/sl/aliases/101/pin/verify', {
     method: 'POST',

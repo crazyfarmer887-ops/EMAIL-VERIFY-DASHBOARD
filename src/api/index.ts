@@ -7,6 +7,7 @@ import { fetchRawEmail } from './email/raw-email.ts';
 import { getSubjectList, getEmailList, getEmailByUid, getLatestEmailReceivedAt } from './email/email-store.ts';
 import { sendTelegramAlert } from './alerts/telegram.ts';
 import { extractAuthCode } from '../lib/auth-code-extractor.ts';
+import { blockedEmailResponseBody, filterBlockedEmails, isBlockedEmailContent } from '../lib/email-blocklist.ts';
 import { fetchAllSimpleLoginAliases } from './simplelogin-aliases.ts';
 
 function loadEnvFile() {
@@ -643,6 +644,9 @@ app.get('/email/raw', async (c) => {
   try {
     const data = await fetchRawEmail(alias, from, ts);
     if (!data) return c.json({ error: '이메일을 찾을 수 없어요' }, 404);
+    if (isBlockedEmailContent({ subject: data.subject, text: data.text, html: data.html }).blocked) {
+      return c.json(blockedEmailResponseBody(), 451);
+    }
     return c.json({
       ...data,
       extractedAuth: extractAuthCode({ subject: data.subject, text: data.text, html: data.html }),
@@ -661,7 +665,8 @@ app.get('/email/subjects', async (c) => {
   if (accessErr) return accessErr;
   try {
     const subjects = await getSubjectList(alias, limit);
-    return c.json({ subjects });
+    const filtered = filterBlockedEmails(subjects.map((subject) => ({ ...subject, text_body: '', html: null })));
+    return c.json({ subjects: filtered.allowed.map(({ text_body: _text, html: _html, ...subject }) => subject), blockedCount: filtered.blockedCount });
   } catch (e: any) {
     return c.json({ subjects: [], error: e.message });
   }
@@ -676,8 +681,10 @@ app.get('/email/list', async (c) => {
   if (accessErr) return accessErr;
   try {
     const emails = await getEmailList(alias, limit);
+    const filtered = filterBlockedEmails(emails);
     return c.json({
-      emails: emails.map(e => ({
+      blockedCount: filtered.blockedCount,
+      emails: filtered.allowed.map(e => ({
         uid: e.uid,
         subject: e.subject,
         from_addr: e.from_addr,
@@ -702,6 +709,9 @@ app.get('/email/uid/:uid', async (c) => {
     if (!row) return c.json({ error: '이메일을 찾을 수 없어요' }, 404);
     const accessErr = await requireEmailAliasAccess(c, row.alias_to);
     if (accessErr) return accessErr;
+    if (isBlockedEmailContent({ subject: row.subject, text_body: row.text_body, html: row.html }).blocked) {
+      return c.json(blockedEmailResponseBody(), 451);
+    }
     return c.json({
       uid: row.uid,
       subject: row.subject,

@@ -40,6 +40,9 @@ test('mailbox, pin detail, and admin screens expose clearer states', () => {
   assert.match(mailDetail, /관리자는 PIN 없이 바로 열람/);
   assert.match(mailDetail, /adminSession\.authenticated/);
   assert.match(mailDetail, /setPinMode\('unlocked'\)/);
+  assert.match(read('src/api/index.ts'), /blockedEmailResponseBody/);
+  assert.match(read('src/api/index.ts'), /filterBlockedEmails/);
+  assert.match(read('src/lib/email-blocklist.ts'), /계정 정보 변경 요청/);
   assert.match(admin, /Gmail sync/);
   assert.match(admin, /관리자 세션/);
 });
