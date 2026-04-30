@@ -9,11 +9,21 @@ import { getAdminSession } from "../lib/pin-api";
 import { StatCard } from "../components/ui/card";
 import { StatusBadge } from "../components/ui/status-badge";
 
+const DOUBLE_PASS_CATEGORY = '티빙+웨이브';
+
 const SERVICE_MAP: Record<string, string> = {
-  disney: '디즈니', netflix: '넷플릭스', watcha: '왓챠', wavve: '웨이브',
-  tving: '티빙', coupang: '쿠팡플레이', laftel: '라프텔',
+  gtwavve: DOUBLE_PASS_CATEGORY,
+  wavve: DOUBLE_PASS_CATEGORY,
+  tving: DOUBLE_PASS_CATEGORY,
+  disney: '디즈니', netflix: '넷플릭스', watcha: '왓챠',
+  coupang: '쿠팡플레이', laftel: '라프텔',
   youtube: '유튜브', apple: 'Apple', prime: '프라임',
 };
+
+function getDoublePassCategoryLabel(firstPart: string): string | null {
+  const normalized = firstPart.toLowerCase();
+  return /^(gtwavve|wavve|tving)\d*/.test(normalized) ? DOUBLE_PASS_CATEGORY : null;
+}
 
 const ALIAS_CACHE_KEY = 'sl_aliases_cache_v1';
 const ALIAS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -22,6 +32,11 @@ const AUTO_REFRESH_INTERVAL = 5000; // 5초마다 auto-refresh
 function emailToLabel(email: string): string {
   const local = email.split('@')[0];
   const firstPart = local.split('.')[0];
+  const doublePassLabel = getDoublePassCategoryLabel(firstPart);
+  if (doublePassLabel) {
+    const num = firstPart.match(/\d+/)?.[0] || '';
+    return `${doublePassLabel}${num}`;
+  }
   for (const [key, label] of Object.entries(SERVICE_MAP)) {
     if (firstPart.toLowerCase().startsWith(key)) {
       const rest = firstPart.slice(key.length);
@@ -290,7 +305,7 @@ export default function MailListPage() {
   const lockedAliases = aliases.filter(a => a.hasPin).length;
   const activeAliases = aliases.filter(a => a.enabled).length;
   const recentWindowLabel = '최근 10분';
-  const serviceCategories = ['전체', ...Object.values(SERVICE_MAP)];
+  const serviceCategories = ['전체', ...Array.from(new Set(Object.values(SERVICE_MAP)))];
   const categoryFilteredAliases = selectedCategory === '전체'
     ? aliases
     : aliases.filter(alias => emailToLabel(alias.email).startsWith(selectedCategory));

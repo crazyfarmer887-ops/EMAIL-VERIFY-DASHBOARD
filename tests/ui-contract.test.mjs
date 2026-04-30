@@ -30,7 +30,11 @@ test('mailbox, pin detail, and admin screens expose clearer states', () => {
   const admin = read('src/web/pages/admin.tsx');
   assert.match(mailList, /카테고리 빠른 보기/);
   assert.match(mailList, /categoryFilteredAliases/);
-  assert.match(mailList, /전체|넷플릭스|티빙|웨이브/);
+  assert.match(mailList, /티빙\+웨이브/);
+  assert.match(mailList, /gtwavve/);
+  assert.match(mailList, /getDoublePassCategoryLabel/);
+  assert.doesNotMatch(mailList, /wavve: '웨이브'/);
+  assert.doesNotMatch(mailList, /tving: '티빙'/);
   assert.match(mailList, /최근 10분/);
   assert.match(mailList, /잠금 필요/);
   assert.match(mailDetail, /관리자는 PIN 없이 바로 열람/);
