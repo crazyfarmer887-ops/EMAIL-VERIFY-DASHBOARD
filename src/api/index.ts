@@ -102,32 +102,48 @@ warnIfWeakSecret('ADMIN_SESSION_SECRET', ADMIN_SESSION_SECRET, [DEFAULT_ADMIN_SE
 // TODO(security): replace plaintext PIN persistence with a one-way hash + migration.
 type PinRecord = { pin: string; updatedAt: string };
 let pinStoreCache: Record<string, PinRecord> | null = null;
+let pinStoreCacheSignature: string | null = null;
 
 function ensurePinStoreDir() {
   const dir = dirname(PIN_STORE_PATH);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
+function pinStoreSignature(): string | null {
+  try {
+    if (!existsSync(PIN_STORE_PATH)) return null;
+    const st = statSync(PIN_STORE_PATH);
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return null;
+  }
+}
+
 function loadPinStore(): Record<string, PinRecord> {
-  if (pinStoreCache) return pinStoreCache;
+  const signature = pinStoreSignature();
+  if (pinStoreCache && pinStoreCacheSignature === signature) return pinStoreCache;
   if (!existsSync(PIN_STORE_PATH)) {
     pinStoreCache = {};
+    pinStoreCacheSignature = null;
     return pinStoreCache;
   }
   try {
     const raw = readFileSync(PIN_STORE_PATH, 'utf8');
     const parsed = JSON.parse(raw) as Record<string, PinRecord>;
     pinStoreCache = parsed && typeof parsed === 'object' ? parsed : {};
+    pinStoreCacheSignature = signature;
   } catch {
     pinStoreCache = {};
+    pinStoreCacheSignature = signature;
   }
   return pinStoreCache;
 }
 
 function savePinStore(store: Record<string, PinRecord>) {
   ensurePinStoreDir();
-  pinStoreCache = store;
   writeFileSync(PIN_STORE_PATH, JSON.stringify(store, null, 2), 'utf8');
+  pinStoreCache = store;
+  pinStoreCacheSignature = pinStoreSignature();
 }
 
 function readTextFileSafe(path: string): string | null {
