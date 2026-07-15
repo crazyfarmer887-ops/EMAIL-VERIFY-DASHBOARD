@@ -8,9 +8,9 @@ import {
   nextGmailSyncDelayMs,
 } from './gmail-sync-backoff.js';
 import { sendTelegramAlert } from '../alerts/telegram.js';
+import { loadGmailClientSecret } from './gmail-client-secret.js';
 
 // ─── OAuth2 설정 (라이브러리 없이 직접) ───────────────────────
-const CLIENT_SECRET_PATH = '/home/ubuntu/.config/gws/client_secret.json';
 const TOKEN_PATH = resolve(process.cwd(), 'gmail-token.json');
 const HISTORY_PATH = resolve(process.cwd(), 'gmail-history-id.txt');
 const POLL_INTERVAL = GMAIL_SYNC_BASE_POLL_INTERVAL_MS;
@@ -32,7 +32,7 @@ function saveTokens(t: Tokens) {
 
 async function refreshAccessToken(): Promise<string> {
   const tokens = loadTokens();
-  const creds = JSON.parse(readFileSync(CLIENT_SECRET_PATH, 'utf8')).installed;
+  const creds = loadGmailClientSecret();
 
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -283,10 +283,11 @@ async function clearGmailSyncErrors() {
 }
 
 export async function startGmailSync() {
-  if (!existsSync(CLIENT_SECRET_PATH) || !existsSync(TOKEN_PATH)) {
-    console.warn('[gmail-sync] OAuth 파일 없음');
+  if (!existsSync(TOKEN_PATH)) {
+    console.warn('[gmail-sync] OAuth 토큰 파일 없음');
     return;
   }
+  loadGmailClientSecret();
   if (_running) return;
   _running = true;
   console.log('[gmail-sync] 시작 (15초 간격)');

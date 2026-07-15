@@ -229,7 +229,7 @@ export default function AdminPage() {
   }
 
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto", minHeight: "100vh", padding: 16, background: "#F8F6FF" }}>
+    <div className="dashboard-shell" style={{ minHeight: "100vh", padding: 16, background: "#F8F6FF" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#1E1B4B", margin: 0 }}>관리자 PIN 관리</h1>

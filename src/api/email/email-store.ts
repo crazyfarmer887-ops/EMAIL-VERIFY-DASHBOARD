@@ -1,11 +1,11 @@
 import { Pool } from 'pg';
 
+// Node's native TypeScript loader requires the explicit extension used at runtime.
+// @ts-ignore TS5097: compatibility varies between the build and Node test loaders.
+import { resolvePostgresConfig } from './database-config.ts';
+
 export const pool = new Pool({
-  host: '127.0.0.1',
-  port: 5432,
-  database: 'emailcache',
-  user: 'emailapp',
-  password: 'emailapp123',
+  ...resolvePostgresConfig(process.env),
   max: 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,

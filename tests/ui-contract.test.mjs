@@ -24,6 +24,27 @@ test('global tokens include semantic email dashboard states', () => {
   }
 });
 
+test('mail list search and accessibility contracts remain present', () => {
+  const mailList = read('src/web/pages/mail-list.tsx');
+  const mailUiContracts = read('src/web/components/mail-ui-contracts.tsx');
+  const css = read('src/web/styles.css');
+  const html = read('index.html');
+
+  assert.match(mailList, /filterMailAliases/);
+  assert.match(mailUiContracts, /aria-live="polite"/);
+  assert.match(mailList, /검색어 지우기/);
+  assert.match(mailList, /aria-pressed=\{active\}/);
+  assert.match(mailList, /별칭 검색/);
+  assert.match(mailList, /dashboard-shell/);
+  assert.match(mailList, /alias-list-grid/);
+  assert.match(css, /max-width:\s*960px/);
+  assert.match(css, /alias-list-grid/);
+  assert.match(css, /:focus-visible/);
+  assert.match(css, /prefers-reduced-motion:\s*reduce/);
+  assert.match(html, /<html lang="ko">/);
+  assert.match(html, /<title>이메일 대시보드<\/title>/);
+});
+
 test('mailbox, pin detail, and admin screens expose clearer states', () => {
   const mailList = read('src/web/pages/mail-list.tsx');
   const mailDetail = read('src/web/pages/mail-detail.tsx');

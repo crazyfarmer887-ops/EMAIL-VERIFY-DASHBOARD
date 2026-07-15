@@ -1,291 +1,186 @@
-import { useState } from "react";
-import { CATEGORIES } from "../lib/constants";
-import { apiPath } from "../lib/path";
-import { RefreshCw, KeyRound, Mail, ChevronDown, ChevronRight, TrendingUp, Loader2, AlertCircle, ExternalLink } from "lucide-react";
-
-interface Member {
-  dealUsid: string; name: string | null; status: string; statusName: string;
-  price: string; purePrice: number; realizedSum: number; progressRatio: string;
-  startDateTime: string | null; endDateTime: string | null; remainderDays: number; source: 'after'|'before';
-}
-interface Account {
-  email: string; serviceType: string; members: Member[]; usingCount: number;
-  activeCount: number; totalSlots: number; totalIncome: number; totalRealizedIncome: number; expiryDate: string | null;
-}
-interface ServiceGroup { serviceType: string; accounts: Account[]; totalUsingMembers: number; totalActiveMembers: number; totalIncome: number; totalRealized: number; }
-interface ManageData { services: ServiceGroup[]; summary: { totalUsingMembers: number; totalActiveMembers: number; totalIncome: number; totalRealized: number; totalAccounts: number; }; updatedAt: string; }
+import { useCallback, useEffect, useId, useMemo, useReducer, useState } from 'react';
+import { AlertCircle, ChevronDown, KeyRound, Mail, RefreshCw, Search, X } from 'lucide-react';
+import { apiPath } from '../lib/path';
+import {
+  ACTIVE_STATUSES,
+  AccountRequestLifecycle,
+  DEFAULT_VIEW,
+  type AccountQueryState,
+  type AccountViewState,
+  type CookieSet,
+  type FilterMode,
+  type ManageMember,
+  type QueryStateMap,
+  type ViewAction,
+  filterManageData,
+  normalizeManageResponse,
+  parseCookieSets,
+  queryStateReducer,
+  viewStateReducer,
+} from '../lib/manage-query';
 
 const STORAGE_KEY = 'graytag_cookies_v2';
-interface CookieSet { id: string; label: string; AWSALB: string; AWSALBCORS: string; JSESSIONID: string; }
-const loadCookies = (): CookieSet[] => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; } };
+const EMPTY_QUERY: AccountQueryState = { data: null, status: 'idle', error: null, updatedAt: null, sequence: 0 };
+const FILTERS: Array<{ value: FilterMode; label: string }> = [
+  { value: 'using', label: '이용 중' },
+  { value: 'active', label: '전체 활성' },
+  { value: 'all', label: '전체 내역' },
+];
 
-const USING_SET = new Set(['Using', 'UsingNearExpiration']);
-const ACTIVE_SET = new Set(['Using','UsingNearExpiration','Delivered','Delivering','DeliveredAndCheckPrepaid','LendingAcceptanceWaiting','Reserved','OnSale']);
-
-const STATUS_BADGE: Record<string, { label: string; color: string; bg: string }> = {
-  Using:                       { label:'이용 중',   color:'#7C3AED', bg:'#F5F3FF' },
-  UsingNearExpiration:         { label:'만료 임박',  color:'#D97706', bg:'#FFFBEB' },
-  OnSale:                      { label:'판매 중',   color:'#059669', bg:'#ECFDF5' },
-  Delivered:                   { label:'전달 완료',  color:'#2563EB', bg:'#EFF6FF' },
-  DeliveredAndCheckPrepaid:    { label:'구매 확정',  color:'#8B5CF6', bg:'#FAF5FF' },
-  Delivering:                  { label:'전달 중',   color:'#0891B2', bg:'#ECFEFF' },
-  Reserved:                    { label:'예약됨',    color:'#6366F1', bg:'#EEF2FF' },
-  LendingAcceptanceWaiting:    { label:'수락 대기',  color:'#D97706', bg:'#FFFBEB' },
-  TradingNegotiationWaiting:   { label:'계정확인중', color:'#3B82F6', bg:'#EFF6FF' },
-  SellerDirectDelivery:       { label:'판매자 직접 전달', color:'#F59E0B', bg:'#FEF3C7' },
-  DirectDelivery:              { label:'직접 전달',    color:'#F59E0B', bg:'#FEF3C7' },
-  DirectTransfer:              { label:'직접 이전',    color:'#F59E0B', bg:'#FEF3C7' },
-  ManualDelivery:              { label:'수동 전달',    color:'#F59E0B', bg:'#FEF3C7' },
-  TransferAccepted:            { label:'전달 수락',    color:'#F59E0B', bg:'#FEF3C7' },
-  NormalFinished:              { label:'완료',      color:'#6B7280', bg:'#F3F4F6' },
-  FinishedByBorrowerRequest:   { label:'중도 종료',  color:'#9CA3AF', bg:'#F9FAFB' },
-  FinishedByLenderRequest:     { label:'중도 종료',  color:'#9CA3AF', bg:'#F9FAFB' },
-  CancelByNoShow:              { label:'취소(노쇼)', color:'#EF4444', bg:'#FFF0F0' },
-  CancelByDepositRejection:    { label:'취소(입금)', color:'#EF4444', bg:'#FFF0F0' },
-  CancelByInspectionRejection: { label:'취소(검수)', color:'#EF4444', bg:'#FFF0F0' },
+const money = (value: number) => value > 0 ? `${value.toLocaleString()}원` : '-';
+const dateTime = (value: number | null) => value
+  ? new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(value)
+  : '아직 조회하지 않음';
+const progress = (value: string) => Math.min(100, Math.max(0, Number.parseFloat(value) || 0));
+const statusLabel = (member: ManageMember) => member.statusName || member.status || '상태 미확인';
+const idSegment = (value: string) => {
+  const encoded = encodeURIComponent(value);
+  return `${encoded.length}-${encoded}`;
 };
 
-const bge = (s: string, n: string) => STATUS_BADGE[s] || { label:n||s, color:'#6B7280', bg:'#F3F4F6' };
-const svcLogo = (s: string) => CATEGORIES.find(c => c.label===s || s.includes(c.label.slice(0,3)))?.logo;
-const svcColors = (s: string) => { const c = CATEGORIES.find(c => c.label===s || s.includes(c.label.slice(0,3))); return { color: c?.color||'#6B7280', bg: c?.bg||'#F3F4F6' }; };
-const fmtMoney = (n: number) => n > 0 ? n.toLocaleString()+'원' : '-';
-const fmtDate = (s: string|null) => s ? s.replace(/\s/g,'').replace(/\.(?=\S)/g,'/').replace(/\.$/, '') : '-';
+interface DashboardProps {
+  cookies: CookieSet[];
+  selectedId: string;
+  query: AccountQueryState;
+  view: AccountViewState;
+  onSelect: (id: string) => void;
+  onRefresh: () => void;
+  onViewAction: (action: ViewAction) => void;
+}
 
-type FilterMode = 'using'|'active'|'all';
-
-export default function ManagePage() {
-  const cookies = loadCookies();
-  const [selectedId, setSelectedId] = useState(cookies[0]?.id||'');
-  const [data, setData] = useState<ManageData|null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string|null>(null);
-  const [openService, setOpenService] = useState<string|null>(null);
-  const [openAccount, setOpenAccount] = useState<string|null>(null);
-  const [filter, setFilter] = useState<FilterMode>('using');
-
-  const doFetch = async (id?: string) => {
-    const cs = cookies.find(c => c.id===(id||selectedId));
-    if (!cs) return;
-    setLoading(true); setError(null); setData(null);
-    try {
-      const res = await fetch(apiPath('/my/management'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ AWSALB:cs.AWSALB, AWSALBCORS:cs.AWSALBCORS, JSESSIONID:cs.JSESSIONID }) });
-      const json = await res.json() as any;
-      console.log("[MANAGE] API response:", json);
-      if (!res.ok) setError(json.error);
-      else { setData(json); if (json.services?.[0]) setOpenService(json.services[0].serviceType); }
-    } catch (e: any) { setError(e.message); }
-    finally { setLoading(false); }
-  };
-
-  if (cookies.length === 0) return (
-    <div style={{ padding:'20px 16px' }}>
-      <h1 style={{ fontSize:22, fontWeight:700, color:'#1E1B4B', margin:'0 0 16px' }}>계정 관리</h1>
-      <div style={{ background:'#EDE9FE', borderRadius:16, padding:20, textAlign:'center' }}>
-        <KeyRound size={36} color="#C4B5FD" style={{ margin:'0 auto 10px' }} />
-        <div style={{ fontSize:14, fontWeight:600, color:'#7C3AED' }}>내 계정 탭에서 쿠키를 먼저 등록해주세요</div>
-      </div>
-    </div>
+export function ManageDashboard({ cookies, selectedId, query, view, onSelect, onRefresh, onViewAction }: DashboardProps) {
+  const idNamespace = useId();
+  const selected = cookies.find((cookie) => cookie.id === selectedId);
+  const filtered = useMemo(
+    () => query.data ? filterManageData(query.data, view.filter, view.search) : null,
+    [query.data, view.filter, view.search],
   );
+  const busy = query.status === 'loading' || query.status === 'refreshing';
+  const hasSearch = view.search.trim().length > 0;
 
-  const sum = data?.summary;
+  if (!cookies.length) {
+    return <main className="manage-page"><section className="manage-empty"><KeyRound aria-hidden="true" /><h1>계정 관리</h1><p>내 계정에서 쿠키를 먼저 등록해 주세요.</p></section></main>;
+  }
 
   return (
-    <div style={{ padding:'20px 16px 0' }}>
-      {/* 헤더 */}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
-        <div>
-          <h1 style={{ fontSize:22, fontWeight:700, color:'#1E1B4B', margin:0 }}>계정 관리</h1>
-          <p style={{ fontSize:12, color:'#9CA3AF', margin:'4px 0 0' }}>
-            {data?.updatedAt ? `${new Date(data.updatedAt).getHours().toString().padStart(2,'0')}:${new Date(data.updatedAt).getMinutes().toString().padStart(2,'0')} 기준` : '이메일 계정별 파티원 현황'}
-          </p>
-        </div>
-        <button onClick={() => doFetch()} disabled={loading} style={{ background:'#A78BFA', border:'none', borderRadius:12, padding:'8px 14px', fontSize:13, color:'#fff', cursor:loading?'not-allowed':'pointer', fontWeight:600, fontFamily:'inherit', opacity:loading?0.7:1, display:'flex', alignItems:'center', gap:6 }}>
-          {loading ? <Loader2 size={14} style={{ animation:'spin 1s linear infinite' }} /> : <RefreshCw size={14} />}
-          {loading ? '조회중' : '조회'}
-        </button>
+    <>
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {query.status === 'loading' && `${selected?.label ?? '계정'} 조회 중`}
+        {query.status === 'refreshing' && `${selected?.label ?? '계정'} 데이터를 갱신 중입니다. 기존 결과를 계속 표시합니다.`}
+        {query.status === 'success' && `${selected?.label ?? '계정'} 조회 완료`}
       </div>
-
-      {/* 계정 선택 */}
-      {cookies.length > 1 && (
-        <div className="no-scrollbar" style={{ display:'flex', gap:8, marginBottom:12, overflowX:'auto' }}>
-          {cookies.map(cs => (
-            <button key={cs.id} onClick={() => setSelectedId(cs.id)} style={{ flexShrink:0, padding:'6px 14px', borderRadius:20, border:'none', fontFamily:'inherit', fontSize:12, fontWeight:600, cursor:'pointer', background: selectedId===cs.id ? '#A78BFA' : '#fff', color: selectedId===cs.id ? '#fff' : '#6B7280', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              {cs.label}
-            </button>
-          ))}
+      <main className="manage-page" aria-busy={busy}>
+      <header className="manage-header">
+        <div>
+          <p className="manage-eyebrow">EMAIL OPERATIONS</p>
+          <h1>계정 관리</h1>
+          <p className="manage-context"><strong>{selected?.label}</strong> · {dateTime(query.updatedAt)} 기준</p>
         </div>
-      )}
+        <button className="manage-primary" type="button" onClick={onRefresh} disabled={busy}>
+          <RefreshCw aria-hidden="true" className={busy ? 'is-spinning' : ''} />
+          {query.status === 'refreshing' ? '갱신 중' : query.status === 'loading' ? '조회 중' : '새로고침'}
+        </button>
+      </header>
 
-      {/* 초기 안내 */}
-      {!data && !loading && !error && (
-        <div style={{ background:'#EDE9FE', borderRadius:16, padding:20, textAlign:'center' }}>
-          <Mail size={32} color="#C4B5FD" style={{ margin:'0 auto 10px' }} />
-          <div style={{ fontSize:14, fontWeight:600, color:'#7C3AED' }}>조회 버튼을 눌러주세요</div>
-          <div style={{ fontSize:12, color:'#9CA3AF', marginTop:4 }}>이메일 계정별 파티원 · 수입 현황</div>
-        </div>
-      )}
+      <nav className="manage-account-tabs" aria-label="조회할 계정">
+        {cookies.map((cookie) => <button key={cookie.id} type="button" aria-pressed={selectedId === cookie.id} onClick={() => onSelect(cookie.id)}>{cookie.label}</button>)}
+      </nav>
 
-      {/* 에러 */}
-      {error && (
-        <div style={{ background:'#FFF0F0', borderRadius:16, padding:'14px 16px' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:13, fontWeight:600, color:'#EF4444', marginBottom:4 }}>
-            <AlertCircle size={15} /> 오류
-          </div>
-          <div style={{ fontSize:12, color:'#6B7280' }}>{error}</div>
-          {error.includes('만료') && (
-            <a href="https://graytag.co.kr/login" target="_blank" rel="noreferrer" style={{ display:'inline-flex', alignItems:'center', gap:4, marginTop:8, fontSize:12, color:'#7C3AED', fontWeight:600 }}>
-              graytag.co.kr 로그인 <ExternalLink size={11} />
-            </a>
-          )}
-        </div>
-      )}
+      {query.error && <div className="manage-alert" role="alert"><AlertCircle aria-hidden="true" /><div><strong>조회하지 못했습니다.</strong><p>{query.error}</p>{query.data && <p>기존 결과는 그대로 유지했습니다.</p>}</div></div>}
+      {query.status === 'loading' && !query.data && <section className="manage-loading"><span className="manage-spinner" aria-hidden="true" />계정 현황을 불러오는 중입니다.</section>}
 
-      {/* 로딩 */}
-      {loading && <div style={{ display:'flex', flexDirection:'column', gap:10 }}>{[1,2,3].map(i => <div key={i} style={{ background:'#fff', borderRadius:16, height:80, opacity:0.5, animation:'pulse 1.5s infinite' }} />)}</div>}
+      {query.data && <>
+        <section className="manage-summary" aria-label="전체 현황">
+          <div><span>계정</span><strong>{query.data.summary.totalAccounts}개</strong></div>
+          <div><span>이용 중</span><strong>{query.data.summary.totalUsingMembers}명</strong></div>
+          <div><span>전체 수입</span><strong>{money(query.data.summary.totalIncome)}</strong></div>
+          <div><span>정산 완료</span><strong>{money(query.data.summary.totalRealized)}</strong></div>
+        </section>
 
-      {data && !loading && (
-        <>
-          {/* 요약 배너 */}
-          <div style={{ background:'linear-gradient(135deg, #A78BFA 0%, #818CF8 100%)', borderRadius:20, padding:'16px 20px', marginBottom:14, color:'#fff' }}>
-            <div style={{ fontSize:12, opacity:0.85, marginBottom:10 }}>전체 현황</div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6, textAlign:'center' }}>
-              {[
-                { label:'계정 수', value:`${sum!.totalAccounts}개` },
-                { label:'이용 중', value:`${sum!.totalUsingMembers}명` },
-                { label:'현재 수입', value:fmtMoney(sum!.totalIncome) },
-                { label:'정산 완료', value:fmtMoney(sum!.totalRealized) },
-              ].map(item => (
-                <div key={item.label} style={{ background:'rgba(255,255,255,0.15)', borderRadius:10, padding:'8px 4px' }}>
-                  <div style={{ fontSize:13, fontWeight:700, lineHeight:1.2 }}>{item.value}</div>
-                  <div style={{ fontSize:9, opacity:0.8, marginTop:3 }}>{item.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
+        <section className="manage-tools" aria-label="검색과 필터">
+          <div className="manage-search"><Search aria-hidden="true" /><input type="search" value={view.search} aria-label="서비스, 이메일, 파티원 통합 검색" placeholder="서비스 · 이메일 · 파티원 검색" onChange={(event) => onViewAction({ type: 'search', accountId: selectedId, value: event.target.value })} />{hasSearch && <button type="button" aria-label="검색 지우기" onClick={() => onViewAction({ type: 'search', accountId: selectedId, value: '' })}><X aria-hidden="true" /></button>}</div>
+          <div className="manage-filters" aria-label="파티원 상태 필터">{FILTERS.map((filter) => <button type="button" key={filter.value} aria-pressed={view.filter === filter.value} onClick={() => onViewAction({ type: 'filter', accountId: selectedId, value: filter.value })}>{filter.label}</button>)}</div>
+        </section>
 
-          {/* 필터 */}
-          <div style={{ display:'flex', gap:6, marginBottom:14 }}>
-            {([
-              { key:'using',  label:'이용 중' },
-              { key:'active', label:'전체 활성' },
-              { key:'all',    label:'전체 내역' },
-            ] as { key: FilterMode; label: string }[]).map(f => (
-              <button key={f.key} onClick={() => setFilter(f.key)} style={{ flex:1, padding:'7px 4px', borderRadius:10, border:'none', fontFamily:'inherit', fontSize:11, fontWeight:600, cursor:'pointer', background: filter===f.key ? '#A78BFA' : '#F3F0FF', color: filter===f.key ? '#fff' : '#6B7280' }}>{f.label}</button>
-            ))}
-          </div>
+        <p className="manage-result-status">{hasSearch ? `검색 결과 파티원 ${filtered?.memberCount ?? 0}명` : `현재 필터 파티원 ${filtered?.memberCount ?? 0}명`}</p>
 
-          {/* 서비스별 */}
-          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-            {data.services.map(svc => {
-              const sc = svcColors(svc.serviceType);
-              const logo = svcLogo(svc.serviceType);
-              const isOpen = openService === svc.serviceType;
-              return (
-                <div key={svc.serviceType} style={{ background:'#fff', borderRadius:16, overflow:'hidden', boxShadow:'0 2px 12px rgba(167,139,250,0.08)', border:`1.5px solid ${isOpen?'#A78BFA':'#F3F0FF'}` }}>
-                  <button onClick={() => setOpenService(isOpen ? null : svc.serviceType)} style={{ width:'100%', display:'flex', alignItems:'center', gap:12, padding:'14px 16px', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit' }}>
-                    <div style={{ width:40, height:40, borderRadius:12, background:sc.bg, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                      {logo ? <img src={logo} alt={svc.serviceType} style={{ width:26, height:26, objectFit:'contain' }} onError={e=>{(e.target as HTMLImageElement).style.display='none';}} /> : null}
-                    </div>
-                    <div style={{ flex:1, textAlign:'left' }}>
-                      <div style={{ fontSize:15, fontWeight:700, color:'#1E1B4B' }}>{svc.serviceType}</div>
-                      <div style={{ fontSize:11, color:'#9CA3AF', marginTop:2 }}>계정 {svc.accounts.length}개 · 이용중 {svc.totalUsingMembers}명</div>
-                    </div>
-                    <div style={{ textAlign:'right', flexShrink:0 }}>
-                      <div style={{ fontSize:14, fontWeight:700, color:'#A78BFA' }}>{fmtMoney(svc.totalIncome)}</div>
-                      <div style={{ fontSize:10, color:'#059669', marginTop:1 }}>정산 {fmtMoney(svc.totalRealized)}</div>
-                    </div>
-                    {isOpen ? <ChevronDown size={16} color="#A78BFA" /> : <ChevronRight size={16} color="#A78BFA" />}
+        {!filtered?.services.length ? <section className="manage-empty"><Mail aria-hidden="true" /><h2>{hasSearch ? '검색 결과가 없습니다' : '이 필터에 해당하는 내역이 없습니다'}</h2><p>{hasSearch ? '서비스, 이메일 또는 파티원 이름을 다시 확인해 주세요.' : '다른 상태 필터를 선택해 보세요.'}</p></section> :
+          <div className="manage-service-grid">{filtered.services.map((service, serviceIndex) => {
+            const serviceKey = service.serviceType;
+            const serviceOpen = view.openService === serviceKey;
+            const serviceIdentity = `${serviceIndex}-${idSegment(serviceKey)}`;
+            const servicePanel = `${idNamespace}-manage-${idSegment(selectedId)}-service-${serviceIdentity}`;
+            return <section className="manage-service" key={serviceKey}>
+              <button type="button" className="manage-service-toggle" aria-expanded={serviceOpen} aria-controls={servicePanel} onClick={() => onViewAction({ type: 'service', accountId: selectedId, value: serviceOpen ? null : serviceKey })}>
+                <span><strong>{service.serviceType}</strong><small>표시 중 계정 {service.accounts.length}개 · 이용 중 {service.totalUsingMembers}명</small></span>
+                <span className="manage-income"><span>전체 수입</span> {money(service.totalIncome)}</span><ChevronDown aria-hidden="true" />
+              </button>
+              <div id={servicePanel} hidden={!serviceOpen} className="manage-accounts">{service.accounts.map((account, accountIndex) => {
+                const accountKey = `${account.email}__${account.serviceType}`;
+                const accountOpen = view.openAccount === accountKey;
+                const accountPanel = `${idNamespace}-manage-${idSegment(selectedId)}-service-${serviceIdentity}-account-${accountIndex}-${idSegment(accountKey)}`;
+                const slotPercent = Math.round((account.usingCount / Math.max(account.totalSlots, 1)) * 100);
+                return <article className="manage-account" key={accountKey}>
+                  <button type="button" className="manage-account-toggle" aria-expanded={accountOpen} aria-controls={accountPanel} onClick={() => onViewAction({ type: 'account', accountId: selectedId, value: accountOpen ? null : accountKey })}>
+                    <span><strong>{account.email}</strong><small>표시 중 {account.usingCount}명 / 전체 {Math.max(account.totalSlots, 1)}슬롯 · {slotPercent}% 사용</small></span><span className="manage-income"><span>전체 수입</span> {money(account.totalIncome)}</span><ChevronDown aria-hidden="true" />
                   </button>
-
-                  {isOpen && (
-                    <div style={{ borderTop:'1px solid #F3F0FF', padding:'8px 12px 12px' }}>
-                      {svc.accounts.map(acct => {
-                        const acctKey = `${acct.email}__${acct.serviceType}`;
-                        const isAcctOpen = openAccount === acctKey;
-                        const filteredMembers = acct.members.filter(m => {
-                          if (filter==='using') return USING_SET.has(m.status);
-                          if (filter==='active') return ACTIVE_SET.has(m.status);
-                          return true;
-                        });
-                        if (filter !== 'all' && acct.usingCount===0 && acct.activeCount===0) return null;
-                        const filledSlots = acct.usingCount || acct.activeCount;
-                        const totalSlots = Math.max(acct.totalSlots, filledSlots, 1);
-                        const fillPct = Math.round((filledSlots/totalSlots)*100);
-                        return (
-                          <div key={acctKey} style={{ marginBottom:8, background:'#F8F6FF', borderRadius:12, overflow:'hidden' }}>
-                            <button onClick={() => setOpenAccount(isAcctOpen ? null : acctKey)} style={{ width:'100%', display:'flex', alignItems:'center', gap:10, padding:'12px 14px', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit' }}>
-                              {/* 슬롯 게이지 */}
-                              <div style={{ flexShrink:0, display:'flex', flexDirection:'column', alignItems:'center', gap:3, minWidth:36 }}>
-                                <div style={{ display:'flex', gap:3 }}>
-                                  {Array.from({length:totalSlots}).map((_,i) => (
-                                    <div key={i} style={{ width: i<acct.usingCount?7:6, height: i<acct.usingCount?18:14, borderRadius:3, background: i<acct.usingCount?'#A78BFA': i<acct.activeCount?'#C4B5FD':'#E9E4FF', alignSelf:'flex-end' }} />
-                                  ))}
-                                </div>
-                                <div style={{ fontSize:9, color:'#9CA3AF' }}>{acct.usingCount}/{totalSlots}</div>
-                              </div>
-                              <div style={{ flex:1, textAlign:'left', minWidth:0 }}>
-                                <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                                  <Mail size={12} color="#9CA3AF" />
-                                  <span style={{ fontSize:12, fontWeight:700, color:'#1E1B4B', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{acct.email}</span>
-                                </div>
-                                <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:3 }}>
-                                  {acct.usingCount === totalSlots && <span style={{ fontSize:10, color:'#059669', fontWeight:600, display:'flex', alignItems:'center', gap:3 }}><TrendingUp size={10} /> 만석</span>}
-                                  <span style={{ fontSize:10, color:'#9CA3AF' }}>{fillPct}% 사용</span>
-                                  {acct.expiryDate && <span style={{ fontSize:10, color:'#9CA3AF' }}>~{fmtDate(acct.expiryDate)}</span>}
-                                </div>
-                              </div>
-                              <div style={{ textAlign:'right', flexShrink:0 }}>
-                                <div style={{ fontSize:13, fontWeight:700, color:'#A78BFA' }}>{fmtMoney(acct.totalIncome)}</div>
-                                {acct.totalRealizedIncome > 0 && <div style={{ fontSize:10, color:'#059669', marginTop:1 }}>정산 {fmtMoney(acct.totalRealizedIncome)}</div>}
-                              </div>
-                              {isAcctOpen ? <ChevronDown size={13} color="#C4B5FD" /> : <ChevronRight size={13} color="#C4B5FD" />}
-                            </button>
-
-                            {isAcctOpen && (
-                              <div style={{ borderTop:'1px solid #EDE9FE', padding:'8px 14px' }}>
-                                {filteredMembers.length === 0 ? (
-                                  <div style={{ fontSize:12, color:'#9CA3AF', textAlign:'center', padding:'8px 0' }}>해당 조건의 파티원 없음</div>
-                                ) : filteredMembers.map((m, idx) => {
-                                  const b = bge(m.status, m.statusName);
-                                  const isUsing = USING_SET.has(m.status);
-                                  return (
-                                    <div key={m.dealUsid} style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'9px 0', borderBottom: idx<filteredMembers.length-1 ? '1px solid #F3F0FF' : 'none' }}>
-                                      <div style={{ width:26, height:26, borderRadius:8, flexShrink:0, background: isUsing?'#A78BFA': ACTIVE_SET.has(m.status)?'#C4B5FD':'#E9E4FF', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:700, marginTop:2, color: isUsing?'#fff': ACTIVE_SET.has(m.status)?'#fff':'#9CA3AF' }}>{idx+1}</div>
-                                      <div style={{ flex:1, minWidth:0 }}>
-                                        <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
-                                          <span style={{ fontSize:13, fontWeight:700, color:'#1E1B4B' }}>{m.name||'(미확인)'}</span>
-                                          <span style={{ fontSize:10, fontWeight:600, color:b.color, background:b.bg, borderRadius:6, padding:'2px 7px' }}>{b.label}</span>
-                                        </div>
-                                        {(m.startDateTime||m.endDateTime) && <div style={{ fontSize:11, color:'#9CA3AF', marginTop:2 }}>{m.startDateTime&&fmtDate(m.startDateTime)}{m.startDateTime&&m.endDateTime&&' ~ '}{m.endDateTime&&fmtDate(m.endDateTime)}{m.remainderDays>0&&` (${m.remainderDays}일)`}</div>}
-                                        {isUsing && m.progressRatio && m.progressRatio!=='0%' && (
-                                          <div style={{ marginTop:5 }}>
-                                            <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:'#9CA3AF', marginBottom:2 }}><span>진행률</span><span>{m.progressRatio}</span></div>
-                                            <div style={{ background:'#E9E4FF', borderRadius:4, height:4 }}><div style={{ background:'#A78BFA', borderRadius:4, height:'100%', width:m.progressRatio, maxWidth:'100%' }} /></div>
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div style={{ textAlign:'right', flexShrink:0 }}>
-                                        <div style={{ fontSize:13, fontWeight:700, color:'#A78BFA' }}>{m.price}</div>
-                                        {m.realizedSum>0 && <div style={{ fontSize:10, color:'#059669', marginTop:2 }}>정산 {m.realizedSum.toLocaleString()}원</div>}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-      <div style={{ height:20 }} />
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:.4} 50%{opacity:.7}}`}</style>
-    </div>
+                  <div id={accountPanel} hidden={!accountOpen} className="manage-members">{account.members.map((member) => {
+                    const amount = progress(member.progressRatio);
+                    return <div className="manage-member" key={member.dealUsid}><div><div className="manage-member-title"><strong>{member.name || '(이름 미확인)'}</strong><span className={ACTIVE_STATUSES.has(member.status) ? 'status-active' : 'status-muted'}>{statusLabel(member)}</span></div>{member.progressRatio && <div className="manage-progress"><div><span>진행률</span><span>{amount}%</span></div><div role="progressbar" aria-label={`${member.name || '파티원'} 이용 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={amount}><span style={{ width: `${amount}%` }} /></div></div>}</div><strong>{member.price}</strong></div>;
+                  })}</div>
+                </article>;
+              })}</div>
+            </section>;
+          })}</div>}
+      </>}
+      </main>
+    </>
   );
+}
+
+function safeCookies() {
+  if (typeof window === 'undefined') return [];
+  return parseCookieSets(window.localStorage.getItem(STORAGE_KEY));
+}
+
+export default function ManagePage() {
+  const [cookies, setCookies] = useState<CookieSet[]>(safeCookies);
+  const [selectedId, setSelectedId] = useState(cookies[0]?.id ?? '');
+  const [queries, dispatchQuery] = useReducer(queryStateReducer, {} as QueryStateMap);
+  const [views, dispatchView] = useReducer(viewStateReducer, {});
+  const lifecycle = useMemo(() => new AccountRequestLifecycle(async (cookie, signal) => {
+    const response = await fetch(apiPath('/my/management'), {
+      method: 'POST', signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ AWSALB: cookie.AWSALB, AWSALBCORS: cookie.AWSALBCORS, JSESSIONID: cookie.JSESSIONID }),
+    });
+    return normalizeManageResponse(response);
+  }, dispatchQuery), [dispatchQuery]);
+
+  const request = useCallback((accountId: string) => {
+    const cookie = cookies.find((item) => item.id === accountId);
+    if (cookie) void lifecycle.request(cookie);
+  }, [cookies, lifecycle]);
+
+  useEffect(() => {
+    const updateCookies = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY) return;
+      lifecycle.dispose();
+      const nextCookies = parseCookieSets(event.newValue);
+      setCookies(nextCookies);
+      setSelectedId((current) => nextCookies.some((cookie) => cookie.id === current)
+        ? current
+        : (nextCookies[0]?.id ?? ''));
+    };
+    window.addEventListener('storage', updateCookies);
+    return () => window.removeEventListener('storage', updateCookies);
+  }, [lifecycle]);
+
+  useEffect(() => () => lifecycle.dispose(), [lifecycle]);
+
+  useEffect(() => {
+    if (selectedId) request(selectedId);
+  }, [selectedId, request]);
+
+  return <ManageDashboard cookies={cookies} selectedId={selectedId} query={queries[selectedId] ?? EMPTY_QUERY} view={views[selectedId] ?? DEFAULT_VIEW} onSelect={setSelectedId} onRefresh={() => void request(selectedId)} onViewAction={dispatchView} />;
 }

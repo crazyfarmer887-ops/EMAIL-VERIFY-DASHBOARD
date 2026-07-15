@@ -1,13 +1,15 @@
-import { apiPath } from '../lib/path';
+import { apiPath, ROUTER_BASE } from '../lib/path';
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import {
-  Mail, RefreshCw, Lock, AlertCircle, Clock, Inbox, Shield, Settings,
+  Mail, RefreshCw, Lock, AlertCircle, Clock, Inbox, Shield, Settings, Search, X,
 } from "lucide-react";
 import { useCooldown } from "../hooks/use-cooldown";
 import { getAdminSession } from "../lib/pin-api";
 import { StatCard } from "../components/ui/card";
 import { StatusBadge } from "../components/ui/status-badge";
+import { filterMailAliases } from '../lib/mail-list-filter';
+import { MailSearchFeedback } from '../components/mail-ui-contracts';
 
 const DOUBLE_PASS_CATEGORY = '티빙+웨이브';
 
@@ -185,6 +187,7 @@ export default function MailListPage() {
   const [, setTick] = useState(0); // pin 상태 갱신용
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('전체');
+  const [searchText, setSearchText] = useState('');
   const cooldown = useCooldown(15_000); // 15초
 
   // auto-refresh 폴링
@@ -306,12 +309,15 @@ export default function MailListPage() {
   const activeAliases = aliases.filter(a => a.enabled).length;
   const recentWindowLabel = '최근 10분';
   const serviceCategories = ['전체', ...Array.from(new Set(Object.values(SERVICE_MAP)))];
-  const categoryFilteredAliases = selectedCategory === '전체'
-    ? aliases
-    : aliases.filter(alias => emailToLabel(alias.email).startsWith(selectedCategory));
+  const categoryFilteredAliases = filterMailAliases(
+    aliases,
+    selectedCategory,
+    searchText,
+    alias => emailToLabel(alias.email),
+  );
 
   return (
-    <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', background: '#F8F6FF', paddingBottom: 80 }}>
+    <main className="dashboard-shell" style={{ minHeight: '100vh', background: '#F8F6FF', paddingBottom: 80 }}>
       {/* 헤더 */}
       <div style={{
         background: '#fff', borderBottom: '1px solid #E9E4FF',
@@ -325,6 +331,12 @@ export default function MailListPage() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+            <a
+              href={`${ROUTER_BASE}/manage`}
+              style={{ background: '#F3F0FF', borderRadius: 10, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#7C3AED', fontWeight: 600, textDecoration: 'none' }}
+            >
+              <Lock aria-hidden="true" size={13} /> 계정 관리
+            </a>
             <button
               onClick={() => navigate('/admin')}
               style={{ background: '#F3F0FF', border: 'none', borderRadius: 10, padding: '8px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#7C3AED', fontWeight: 600, fontFamily: 'inherit' }}
@@ -398,12 +410,42 @@ export default function MailListPage() {
                 const count = category === '전체' ? aliases.length : aliases.filter(alias => emailToLabel(alias.email).startsWith(category)).length;
                 if (category !== '전체' && count === 0) return null;
                 return (
-                  <button key={category} onClick={() => setSelectedCategory(category)} style={{ flexShrink: 0, border: 'none', borderRadius: 999, padding: '7px 10px', background: active ? '#7C3AED' : '#fff', color: active ? '#fff' : '#7C3AED', fontSize: 11, fontWeight: 900, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 1px 6px rgba(124,58,237,0.10)' }}>
+                  <button key={category} aria-pressed={active} onClick={() => setSelectedCategory(category)} style={{ flexShrink: 0, border: 'none', borderRadius: 999, padding: '7px 10px', background: active ? '#7C3AED' : '#fff', color: active ? '#fff' : '#7C3AED', fontSize: 11, fontWeight: 900, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 1px 6px rgba(124,58,237,0.10)' }}>
                     {category} {count}
                   </button>
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {!loading && aliases.length > 0 && (
+          <div className="alias-search" role="search" style={{ marginBottom: 12 }}>
+            <label htmlFor="alias-search-input" style={{ display: 'block', fontSize: 12, fontWeight: 900, color: '#1E1B4B', marginBottom: 7 }}>
+              별칭 검색
+            </label>
+            <div style={{ position: 'relative' }}>
+              <Search aria-hidden="true" size={16} color="#9CA3AF" style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+              <input
+                id="alias-search-input"
+                type="search"
+                value={searchText}
+                onChange={event => setSearchText(event.target.value)}
+                placeholder="표시명, 이메일, ID, 메모 검색"
+                style={{ width: '100%', border: '1.5px solid #E9E4FF', borderRadius: 12, background: '#fff', padding: '11px 44px 11px 39px', color: '#1E1B4B', fontSize: 13, fontFamily: 'inherit' }}
+              />
+              {searchText && (
+                <button
+                  type="button"
+                  aria-label="검색어 지우기"
+                  onClick={() => setSearchText('')}
+                  style={{ position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)', border: 'none', borderRadius: 8, background: '#F3F0FF', color: '#7C3AED', padding: 6, display: 'flex', cursor: 'pointer' }}
+                >
+                  <X aria-hidden="true" size={15} />
+                </button>
+              )}
+            </div>
+            <MailSearchFeedback count={categoryFilteredAliases.length} hasQuery={searchText.trim().length > 0} />
           </div>
         )}
 
@@ -465,8 +507,8 @@ export default function MailListPage() {
 
         {/* 별칭 목록 */}
         {!loading && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {categoryFilteredAliases.length === 0 && !error && (
+          <div className="alias-list-grid">
+            {categoryFilteredAliases.length === 0 && !error && !searchText.trim() && (
               <div style={{ textAlign: 'center', padding: '40px 0', color: '#9CA3AF' }}>
                 <Inbox size={32} color="#E9E4FF" style={{ margin: '0 auto 10px', display: 'block' }} />
                 {selectedCategory === '전체' ? '별칭이 없어요' : `${selectedCategory} 별칭이 없어요`}
@@ -562,6 +604,6 @@ export default function MailListPage() {
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.7} }
       `}</style>
-    </div>
+    </main>
   );
 }

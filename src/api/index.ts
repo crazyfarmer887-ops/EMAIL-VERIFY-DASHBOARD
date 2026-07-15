@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
 import { cors } from "hono/cors";
@@ -7,8 +7,10 @@ import { fetchRawEmail } from './email/raw-email.ts';
 import { getSubjectList, getEmailList, getEmailByUid, getLatestEmailReceivedAt } from './email/email-store.ts';
 import { sendTelegramAlert } from './alerts/telegram.ts';
 import { extractAuthCode } from '../lib/auth-code-extractor.ts';
-import { blockedEmailResponseBody, filterBlockedEmails, isBlockedEmailContent } from '../lib/email-blocklist.ts';
+import { ACCOUNT_INFO_BLOCK_LIST_SUBJECT, ACCOUNT_INFO_BLOCK_WARNING, blockedEmailResponseBody, filterBlockedEmails, isBlockedEmailContent } from '../lib/email-blocklist.ts';
 import { fetchAllSimpleLoginAliases } from './simplelogin-aliases.ts';
+import { AliasPinStore } from './security/pin-store.ts';
+import { handleManagementProxy } from './manage-proxy.ts';
 
 function loadEnvFile() {
   const envPath = resolve(process.cwd(), '.env');
@@ -35,7 +37,35 @@ function loadEnvFile() {
 loadEnvFile();
 
 const app = new Hono().basePath('/api');
-app.use(cors({ origin: "*" }));
+const corsAllowedOrigins = new Set([
+  'https://email-verify.one',
+  ...(process.env.CORS_ALLOWED_ORIGINS || '').split(',').map(origin => origin.trim()).filter(Boolean),
+]);
+app.use(cors({
+  origin: origin => corsAllowedOrigins.has(origin) ? origin : undefined,
+}));
+
+const READ_RATE_LIMIT_MAX = Math.max(1, Number(process.env.READ_RATE_LIMIT_MAX || '120'));
+const READ_RATE_LIMIT_WINDOW_MS = Math.max(1_000, Number(process.env.READ_RATE_LIMIT_WINDOW_MS || '60000'));
+const readRateLimits = new Map<string, { count: number; resetAt: number }>();
+app.use('*', async (c, next) => {
+  if (c.req.method !== 'GET' || isAdminRequest(c)) return next();
+  const now = Date.now();
+  const key = getServerObservedIp(c);
+  const previous = readRateLimits.get(key);
+  const entry = !previous || previous.resetAt <= now
+    ? { count: 0, resetAt: now + READ_RATE_LIMIT_WINDOW_MS }
+    : previous;
+  entry.count += 1;
+  readRateLimits.set(key, entry);
+  if (entry.count > READ_RATE_LIMIT_MAX) {
+    const retryAfter = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+    return c.json({ error: '요청이 너무 많아요. 잠시 후 다시 시도해주세요.' }, 429, {
+      'Retry-After': String(retryAfter),
+    });
+  }
+  return next();
+});
 
 const SL_API = 'https://app.simplelogin.io/api';
 const SL_KEY = (globalThis as any).SIMPLELOGIN_API_KEY || process.env.SIMPLELOGIN_API_KEY || '';
@@ -56,6 +86,7 @@ function setCached(key: string, data: any) {
 }
 
 const PIN_STORE_PATH = resolve(process.cwd(), 'data', 'alias-pins.json');
+const pinStore = new AliasPinStore(PIN_STORE_PATH);
 const GMAIL_TOKEN_PATH = resolve(process.cwd(), 'gmail-token.json');
 const GMAIL_HISTORY_PATH = resolve(process.cwd(), 'gmail-history-id.txt');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -99,52 +130,6 @@ function adminSessionCookie(value: string, maxAgeSec: number, c: any) {
 
 warnIfWeakSecret('ADMIN_SESSION_SECRET', ADMIN_SESSION_SECRET, [DEFAULT_ADMIN_SESSION_SECRET, ADMIN_PASSWORD].filter(Boolean));
 
-// TODO(security): replace plaintext PIN persistence with a one-way hash + migration.
-type PinRecord = { pin: string; updatedAt: string };
-let pinStoreCache: Record<string, PinRecord> | null = null;
-let pinStoreCacheSignature: string | null = null;
-
-function ensurePinStoreDir() {
-  const dir = dirname(PIN_STORE_PATH);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-}
-
-function pinStoreSignature(): string | null {
-  try {
-    if (!existsSync(PIN_STORE_PATH)) return null;
-    const st = statSync(PIN_STORE_PATH);
-    return `${st.mtimeMs}:${st.size}`;
-  } catch {
-    return null;
-  }
-}
-
-function loadPinStore(): Record<string, PinRecord> {
-  const signature = pinStoreSignature();
-  if (pinStoreCache && pinStoreCacheSignature === signature) return pinStoreCache;
-  if (!existsSync(PIN_STORE_PATH)) {
-    pinStoreCache = {};
-    pinStoreCacheSignature = null;
-    return pinStoreCache;
-  }
-  try {
-    const raw = readFileSync(PIN_STORE_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as Record<string, PinRecord>;
-    pinStoreCache = parsed && typeof parsed === 'object' ? parsed : {};
-    pinStoreCacheSignature = signature;
-  } catch {
-    pinStoreCache = {};
-    pinStoreCacheSignature = signature;
-  }
-  return pinStoreCache;
-}
-
-function savePinStore(store: Record<string, PinRecord>) {
-  ensurePinStoreDir();
-  writeFileSync(PIN_STORE_PATH, JSON.stringify(store, null, 2), 'utf8');
-  pinStoreCache = store;
-  pinStoreCacheSignature = pinStoreSignature();
-}
 
 function readTextFileSafe(path: string): string | null {
   try {
@@ -164,8 +149,8 @@ function getFileMtimeIso(path: string): string | null {
   }
 }
 
-function getProtectedAliasCount() {
-  return Object.values(loadPinStore()).filter(record => !!record?.pin).length;
+async function getProtectedAliasCount() {
+  return pinStore.count();
 }
 
 function getGmailStatus(warnings: string[]) {
@@ -214,30 +199,18 @@ function getSellerStatusWarnings(warnings: string[]) {
   return Array.from(new Set(warnings));
 }
 
-function getAliasPin(aliasId: number | string): string | null {
-  return loadPinStore()[String(aliasId)]?.pin || null;
+async function hasAliasPin(aliasId: number | string): Promise<boolean> {
+  return pinStore.has(aliasId);
 }
 
-function hasAliasPin(aliasId: number | string): boolean {
-  return !!getAliasPin(aliasId);
-}
-
-function aliasWithPinStatus(alias: any) {
+async function aliasWithPinStatus(alias: any, admin = false) {
   if (!alias || typeof alias !== 'object') return alias;
-  const { pin: _pin, ...safeAlias } = alias;
-  return { ...safeAlias, hasPin: hasAliasPin(alias.id) };
-}
-
-function setAliasPin(aliasId: number | string, pin: string) {
-  const store = loadPinStore();
-  store[String(aliasId)] = { pin, updatedAt: new Date().toISOString() };
-  savePinStore(store);
-}
-
-function removeAliasPin(aliasId: number | string) {
-  const store = loadPinStore();
-  delete store[String(aliasId)];
-  savePinStore(store);
+  const safeAlias: Record<string, unknown> = {};
+  const fields = admin
+    ? ['id', 'email', 'enabled', 'nb_forward', 'nb_block', 'nb_reply', 'note', 'creation_date']
+    : ['id', 'email', 'enabled', 'nb_forward', 'nb_block', 'note'];
+  for (const field of fields) safeAlias[field] = alias[field];
+  return { ...safeAlias, hasPin: await hasAliasPin(alias.id) };
 }
 
 function parseCookies(cookieHeader: string | null | undefined) {
@@ -313,6 +286,9 @@ app.post('/admin/login', async (c) => {
 app.post('/admin/logout', (c) => c.json({ ok: true }, 200, {
   'Set-Cookie': adminSessionCookie('', 0, c),
 }));
+
+// Graytag 사용자 쿠키로 관리 UI 데이터만 조회하는 고정 목적 AIO 프록시.
+app.post('/my/management', handleManagementProxy);
 
 // ─── 서버 사이드 Unlock 토큰 (alias별, guest별, 30분) ──────────
 const UNLOCK_TOKEN_SECRET=resolveSecret('UNLOCK_TOKEN_SECRET', ADMIN_PASSWORD || DEFAULT_UNLOCK_TOKEN_SECRET, [DEFAULT_UNLOCK_TOKEN_SECRET]);
@@ -432,8 +408,8 @@ app.post('/sl/aliases/:id/pin/verify', async (c) => {
   const guestId = String(body?.guestId || '').trim();
   if (!guestId) return c.json({ error: 'guestId가 필요해요' }, 400);
 
-  const stored = getAliasPin(id);
-  if (!stored) return c.json({ error: 'PIN이 설정되지 않은 이메일이에요' }, 404);
+  const verification = await pinStore.verify(id, pin);
+  if (!verification.configured) return c.json({ error: 'PIN이 설정되지 않은 이메일이에요' }, 404);
 
   const failureKeys = pinFailureKeys(id, guestId, c);
   const locked = failureKeys.map(key => getPinLockout(key)).find(entry => entry?.lockedUntil);
@@ -442,7 +418,7 @@ app.post('/sl/aliases/:id/pin/verify', async (c) => {
     return pinLockedResponse(c, locked);
   }
 
-  if (stored !== pin) {
+  if (!verification.matched) {
     const failures = failureKeys.map(key => recordPinFailure(key));
     const lockedFailure = failures.find(entry => entry.lockedUntil);
     if (lockedFailure) {
@@ -469,7 +445,7 @@ app.post('/sl/aliases/:id/pin/check', async (c) => {
 // hasPin 실시간 조회 (캐시 우회 - PIN 설정/해제 직후 정확한 상태 반환)
 app.get('/sl/aliases/:id/pin/status', async (c) => {
   const { id } = c.req.param();
-  return c.json({ hasPin: !!getAliasPin(id) });
+  return c.json({ hasPin: await hasAliasPin(id) });
 });
 
 function extractEmailAddress(value: string) {
@@ -481,6 +457,8 @@ function getAccessParam(c: any, name: string) {
 }
 
 async function getSimpleLoginAliasEmail(aliasId: string): Promise<string | null> {
+  const decodedAliasId = decodeURIComponent(String(aliasId || '')).trim().toLowerCase();
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(decodedAliasId)) return decodedAliasId;
   const cached = getCached(`alias_${aliasId}`, ALIAS_TTL);
   if (cached?.email) return String(cached.email);
   try {
@@ -506,7 +484,7 @@ async function requireEmailAliasAccess(c: any, alias: string) {
     return c.json({ error: '이메일 접근 권한이 없어요' }, 403);
   }
 
-  if (!hasAliasPin(aliasId)) return null;
+  if (!await hasAliasPin(aliasId)) return null;
 
   const cookies = parseCookies(c.req.header('cookie'));
   const unlockToken = getAccessParam(c, 'x-sl-unlock-token') || getAccessParam(c, 'unlockToken');
@@ -524,16 +502,16 @@ app.put('/admin/pins/:id', async (c) => {
   const pin = normalizePinInput(String(body?.pin || ''));
   if (!/^\d{4,12}$/.test(pin)) return c.json({ error: 'PIN은 숫자 4~12자리로 입력해주세요' }, 400);
 
-  setAliasPin(id, pin);
+  await pinStore.set(id, pin);
   return c.json({ ok: true, hasPin: true });
 });
 
-app.delete('/admin/pins/:id', (c) => {
+app.delete('/admin/pins/:id', async (c) => {
   const adminErr = requireAdmin(c);
   if (adminErr) return adminErr;
 
   const { id } = c.req.param();
-  removeAliasPin(id);
+  await pinStore.remove(id);
   return c.json({ ok: true, hasPin: false });
 });
 
@@ -543,12 +521,17 @@ app.get('/sl/aliases', async (c) => {
   const force = c.req.query('force') === '1';
   const all = c.req.query('all') !== '0';
   const cacheKey = all ? `aliases_all_${page}` : `aliases_${page}`;
+  if (force) {
+    const adminErr = requireAdmin(c);
+    if (adminErr) return adminErr;
+  }
+  const admin = isAdminRequest(c);
 
   if (!force) {
     const cached = getCached(cacheKey, ALIAS_TTL);
     if (cached) {
       const aliases = Array.isArray(cached.aliases)
-        ? cached.aliases.map(aliasWithPinStatus)
+        ? await Promise.all(cached.aliases.map((alias: any) => aliasWithPinStatus(alias, admin)))
         : cached.aliases;
       return c.json({ ...cached, aliases, _cached: true });
     }
@@ -566,7 +549,7 @@ app.get('/sl/aliases', async (c) => {
 
     if (!data.error) setCached(cacheKey, data);
     const aliases = Array.isArray(data.aliases)
-      ? data.aliases.map(aliasWithPinStatus)
+      ? await Promise.all(data.aliases.map((alias: any) => aliasWithPinStatus(alias, admin)))
       : data.aliases;
     return c.json({ ...data, aliases });
   } catch (e: any) {
@@ -574,7 +557,7 @@ app.get('/sl/aliases', async (c) => {
       const cached = getCached(cacheKey, Infinity); // rate limit 시 만료된 캐시라도 반환
       if (cached) {
         const aliases = Array.isArray(cached.aliases)
-          ? cached.aliases.map(aliasWithPinStatus)
+          ? await Promise.all(cached.aliases.map((alias: any) => aliasWithPinStatus(alias, admin)))
           : cached.aliases;
         return c.json({ ...cached, aliases, _cached: true, _rate_limited: true });
       }
@@ -587,6 +570,21 @@ app.get('/sl/aliases', async (c) => {
 // SimpleLogin - 특정 별칭 상세
 app.get('/sl/aliases/:id', async (c) => {
   const { id } = c.req.param();
+  const decodedId = decodeURIComponent(String(id || '')).trim().toLowerCase();
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(decodedId)) {
+    return c.json({
+      id: decodedId,
+      email: decodedId,
+      enabled: true,
+      nb_forward: 0,
+      nb_block: 0,
+      nb_reply: 0,
+      note: null,
+      creation_date: '',
+      hasPin: await hasAliasPin(decodedId),
+      virtual: true,
+    });
+  }
   const cacheKey = `alias_${id}`;
   const cached = getCached(cacheKey, ALIAS_TTL);
   if (cached) return c.json({ ...cached, _cached: true });
@@ -599,7 +597,7 @@ app.get('/sl/aliases/:id', async (c) => {
     }
     const data = await res.json() as any;
     if (!data.error) setCached(cacheKey, data);
-    return c.json({ ...data, hasPin: hasAliasPin(id) });
+    return c.json(await aliasWithPinStatus(data, isAdminRequest(c)));
   } catch (e: any) { return c.json({ error: e.message }, 500); }
 });
 
@@ -609,6 +607,10 @@ app.get('/sl/aliases/:id/activities', async (c) => {
   const page = c.req.query('page') || '0';
   const force = c.req.query('force') === '1';
   const cacheKey = `activities_${id}_${page}`;
+  if (force) {
+    const adminErr = requireAdmin(c);
+    if (adminErr) return adminErr;
+  }
 
   if (!force) {
     const cached = getCached(cacheKey, ACTIVITY_TTL);
@@ -640,7 +642,7 @@ app.get('/seller/status', async (c) => {
     ok: gmail.ok && uniqueWarnings.length === 0,
     generatedAt: new Date().toISOString(),
     gmail,
-    pins: { protectedAliases: getProtectedAliasCount() },
+    pins: { protectedAliases: await getProtectedAliasCount() },
     email,
     warnings: uniqueWarnings,
   });
@@ -660,7 +662,7 @@ app.get('/email/raw', async (c) => {
   try {
     const data = await fetchRawEmail(alias, from, ts);
     if (!data) return c.json({ error: '이메일을 찾을 수 없어요' }, 404);
-    if (isBlockedEmailContent({ subject: data.subject, text: data.text, html: data.html }).blocked) {
+    if (!isAdminRequest(c) && isBlockedEmailContent({ subject: data.subject, text: data.text, html: data.html }).blocked) {
       return c.json(blockedEmailResponseBody(), 451);
     }
     return c.json({
@@ -681,7 +683,8 @@ app.get('/email/subjects', async (c) => {
   if (accessErr) return accessErr;
   try {
     const subjects = await getSubjectList(alias, limit);
-    const filtered = filterBlockedEmails(subjects.map((subject) => ({ ...subject, text_body: '', html: null })));
+    const subjectRows = subjects.map((subject) => ({ ...subject, text_body: '', html: null }));
+    const filtered = isAdminRequest(c) ? { allowed: subjectRows, blockedCount: 0 } : filterBlockedEmails(subjectRows);
     return c.json({ subjects: filtered.allowed.map(({ text_body: _text, html: _html, ...subject }) => subject), blockedCount: filtered.blockedCount });
   } catch (e: any) {
     return c.json({ subjects: [], error: e.message });
@@ -697,10 +700,31 @@ app.get('/email/list', async (c) => {
   if (accessErr) return accessErr;
   try {
     const emails = await getEmailList(alias, limit);
-    const filtered = filterBlockedEmails(emails);
-    return c.json({
-      blockedCount: filtered.blockedCount,
-      emails: filtered.allowed.map(e => ({
+    const now = Math.floor(Date.now() / 1000);
+    const TEN_MIN_SEC = 10 * 60;
+    let blockedCount = 0;
+    const visibleEmails: any[] = [];
+    for (const e of emails) {
+      const block = isAdminRequest(c) ? { blocked: false } : isBlockedEmailContent({ subject: e.subject, text_body: e.text_body, html: e.html });
+      if (block.blocked) {
+        blockedCount += 1;
+        if (now - Number(e.timestamp_sec) > TEN_MIN_SEC) continue;
+        visibleEmails.push({
+          uid: e.uid,
+          subject: ACCOUNT_INFO_BLOCK_LIST_SUBJECT,
+          from_addr: e.from_addr,
+          original_from: e.original_from,
+          alias_to: e.alias_to,
+          date_str: e.date_str,
+          timestamp_sec: Number(e.timestamp_sec),
+          restricted: true,
+          blocked: true,
+          warning: ACCOUNT_INFO_BLOCK_WARNING,
+          extractedAuth: { codes: [], links: [], confidence: 'none' as const, source: 'none' as const },
+        });
+        continue;
+      }
+      visibleEmails.push({
         uid: e.uid,
         subject: e.subject,
         from_addr: e.from_addr,
@@ -708,8 +732,13 @@ app.get('/email/list', async (c) => {
         alias_to: e.alias_to,
         date_str: e.date_str,
         timestamp_sec: Number(e.timestamp_sec),
+        restricted: false,
         extractedAuth: extractAuthCode({ subject: e.subject, text: e.text_body, html: e.html }),
-      })),
+      });
+    }
+    return c.json({
+      blockedCount,
+      emails: visibleEmails,
     });
   } catch (e: any) {
     return c.json({ emails: [], error: e.message });
@@ -725,8 +754,15 @@ app.get('/email/uid/:uid', async (c) => {
     if (!row) return c.json({ error: '이메일을 찾을 수 없어요' }, 404);
     const accessErr = await requireEmailAliasAccess(c, row.alias_to);
     if (accessErr) return accessErr;
-    if (isBlockedEmailContent({ subject: row.subject, text_body: row.text_body, html: row.html }).blocked) {
-      return c.json(blockedEmailResponseBody(), 451);
+    if (!isAdminRequest(c) && isBlockedEmailContent({ subject: row.subject, text_body: row.text_body, html: row.html }).blocked) {
+      return c.json({
+        ...blockedEmailResponseBody(),
+        from: row.from_addr,
+        originalFrom: row.original_from,
+        aliasTo: row.alias_to,
+        date: row.date_str,
+        timestamp_sec: Number(row.timestamp_sec),
+      }, 451);
     }
     return c.json({
       uid: row.uid,

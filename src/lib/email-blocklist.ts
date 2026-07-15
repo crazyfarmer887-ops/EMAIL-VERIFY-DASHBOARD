@@ -11,6 +11,9 @@ export interface EmailBlockResult {
   matchedKeyword?: string;
 }
 
+export const ACCOUNT_INFO_BLOCK_WARNING = '계정 정보 이메일 확인되었습니다. 변경하지 마세요!';
+export const ACCOUNT_INFO_BLOCK_LIST_SUBJECT = '계정 정보 이메일';
+
 export const ACCOUNT_INFO_CHANGE_BLOCK_KEYWORDS = [
   '계정 정보 변경 요청',
   '계정정보 변경 요청',
@@ -21,7 +24,10 @@ export const ACCOUNT_INFO_CHANGE_BLOCK_KEYWORDS = [
   '로그인정보 변경 요청',
   '로그인 정보 변경',
   '비밀번호 변경 요청',
+  '비밀번호 재설정 요청',
+  '비밀번호 재설정',
   '비번 변경 요청',
+  '비번 재설정 요청',
   '이메일 변경 요청',
   '메일 변경 요청',
   'account information change request',
@@ -29,6 +35,8 @@ export const ACCOUNT_INFO_CHANGE_BLOCK_KEYWORDS = [
   'change your account information',
   'change account information',
   'password change request',
+  'password reset request',
+  'reset your password',
   'email change request',
   'login information change',
 ];
@@ -89,7 +97,18 @@ export function filterBlockedEmails<T extends EmailBlockInput>(emails: T[]): { a
 export function blockedEmailResponseBody() {
   return {
     blocked: true,
+    restricted: true,
     reason: 'account-info-change-request',
-    error: '보안 정책에 따라 이 이메일은 차단됐어요.',
+    warning: ACCOUNT_INFO_BLOCK_WARNING,
+    error: ACCOUNT_INFO_BLOCK_WARNING,
+    subject: ACCOUNT_INFO_BLOCK_LIST_SUBJECT,
+    html: null,
+    text: null,
+    extractedAuth: {
+      codes: [],
+      links: [],
+      confidence: 'none' as const,
+      source: 'none' as const,
+    },
   };
 }

@@ -1,8 +1,8 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { findEmail, upsertEmail, type EmailRow } from './email-store.ts';
+import { loadGmailClientSecret } from './gmail-client-secret.ts';
 
-const CLIENT_SECRET_PATH = '/home/ubuntu/.config/gws/client_secret.json';
 const TOKEN_PATH = resolve(process.cwd(), 'gmail-token.json');
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
@@ -30,7 +30,7 @@ async function getAccessToken(): Promise<string> {
   const t = loadTokens();
   if (t.expiry_date > Date.now() + 60000) return t.access_token;
   // refresh
-  const creds = JSON.parse(readFileSync(CLIENT_SECRET_PATH, 'utf8')).installed;
+  const creds = loadGmailClientSecret();
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

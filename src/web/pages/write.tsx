@@ -58,7 +58,7 @@ export default function WritePage() {
     const p = pin || '{PIN}';
     return `✅ 아래 내용 꼭 읽어주세요! 로그인 관련 내용입니다!! ✅
 로그인 시도 간 필요한 이메일 코드는 아래 사이트에서 언제든지 셀프인증 가능합니다!
-https://email-verify.xyz/email/mail/${eid}
+https://email-verify.one/email/mail/${eid}
 사이트에서 필요한 핀번호는 : ${p}입니다!
 
 프로필을 만드실 때, 본명에서 가운데 글자를 별(*)로 가려주세요!

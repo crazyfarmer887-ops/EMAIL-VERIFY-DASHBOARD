@@ -1,0 +1,43 @@
+[Unit]
+Description=Graytag email verification dashboard
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=@@SERVICE_USER@@
+Group=@@SERVICE_GROUP@@
+WorkingDirectory=@@APP_ROOT@@/current
+Environment=NODE_ENV=production
+Environment=PORT=3001
+Environment=APP_BASE_PATH=/email
+Environment=GMAIL_CLIENT_SECRET_PATH=/etc/graytag-email-dashboard/gmail-client-secret.json
+EnvironmentFile=/etc/graytag-email-dashboard/environment
+ExecStart=/usr/bin/node dist/server.js
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+UMask=0077
+
+# Files in a release are immutable; only shared runtime state is writable.
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectClock=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+ReadWritePaths=@@APP_ROOT@@/shared
+
+[Install]
+WantedBy=multi-user.target

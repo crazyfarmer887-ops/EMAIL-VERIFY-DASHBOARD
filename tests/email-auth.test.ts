@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -15,6 +15,11 @@ process.env.ADMIN_PASSWORD='test-admin-password-not-a-real-secret';
 process.env.ADMIN_SESSION_SECRET='test-admin-session-secret-32-bytes-minimum';
 process.env.UNLOCK_TOKEN_SECRET='test-unlock-token-secret-32-bytes-minimum';
 process.env.SIMPLELOGIN_API_KEY = 'test-sl-key';
+process.env.PGHOST = '127.0.0.1';
+process.env.PGPORT = '5432';
+process.env.PGDATABASE = 'test-emailcache';
+process.env.PGUSER = 'test-emailapp';
+process.env.PGPASSWORD = 'test-password-not-a-real-secret';
 
 globalThis.fetch = async (input: string | URL | Request) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
@@ -124,24 +129,71 @@ test('email uid detail accepts an admin session without alias PIN headers', asyn
   assert.equal(data.aliasTo, 'locked@example.com');
 });
 
-test('email APIs block account-information-change request emails after authorization', async () => {
-  const cookie = await loginAsAdmin();
-  const original = { subject: row.subject, html: row.html, text_body: row.text_body };
+test('email APIs hide account-information-change request emails from alias-unlocked non-admin users', async () => {
+  const verify = await app.request('/api/sl/aliases/101/pin/verify', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ pin: '1234', guestId: 'guest-sensitive-hide' }),
+  });
+  assert.equal(verify.status, 200);
+  const { unlockToken } = await verify.json() as any;
+  const unlockHeaders = {
+    'x-sl-alias-id': '101',
+    'x-sl-guest-id': 'guest-sensitive-hide',
+    'x-sl-unlock-token': unlockToken,
+  };
+
+  const original = { subject: row.subject, html: row.html, text_body: row.text_body, timestamp_sec: row.timestamp_sec };
   row.subject = '계정 정보 변경 요청';
   row.text_body = '계정 정보 변경 요청을 완료하려면 링크를 누르세요.';
   row.html = '<p>계정 정보 변경 요청</p>';
+  row.timestamp_sec = Math.floor(Date.now() / 1000);
+  try {
+    const list = await app.request('/api/email/list?alias=locked%40example.com&limit=10', { headers: unlockHeaders });
+    assert.equal(list.status, 200);
+    const listData = await list.json() as any;
+    assert.equal(listData.blockedCount, 1);
+    assert.equal(listData.emails.length, 1);
+    assert.equal(listData.emails[0].restricted, true);
+    assert.equal(listData.emails[0].subject, '계정 정보 이메일');
+    assert.equal(listData.emails[0].warning, '계정 정보 이메일 확인되었습니다. 변경하지 마세요!');
+    assert.deepEqual(listData.emails[0].extractedAuth.codes, []);
+    assert.equal(JSON.stringify(listData).includes('계정 정보 변경 요청'), false);
+
+    const detail = await app.request('/api/email/uid/555', { headers: unlockHeaders });
+    assert.equal(detail.status, 451);
+    const detailData = await detail.json() as any;
+    assert.equal(detailData.blocked, true);
+    assert.equal(detailData.restricted, true);
+    assert.equal(detailData.warning, '계정 정보 이메일 확인되었습니다. 변경하지 마세요!');
+    assert.equal(JSON.stringify(detailData).includes('계정 정보 변경 요청'), false);
+  } finally {
+    row.subject = original.subject;
+    row.html = original.html;
+    row.text_body = original.text_body;
+    row.timestamp_sec = original.timestamp_sec;
+  }
+});
+
+test('email APIs show account-information-change request emails only to active admins', async () => {
+  const cookie = await loginAsAdmin();
+  const original = { subject: row.subject, html: row.html, text_body: row.text_body };
+  row.subject = '비밀번호 재설정 요청';
+  row.text_body = '비밀번호 재설정 요청을 완료하려면 링크를 누르세요.';
+  row.html = '<p>비밀번호 재설정 요청</p>';
   try {
     const list = await app.request('/api/email/list?alias=locked%40example.com&limit=10', { headers: { cookie } });
     assert.equal(list.status, 200);
     const listData = await list.json() as any;
-    assert.equal(listData.blockedCount, 1);
-    assert.deepEqual(listData.emails, []);
+    assert.equal(listData.blockedCount, 0);
+    assert.equal(listData.emails[0].uid, 555);
+    assert.equal(listData.emails[0].subject, '비밀번호 재설정 요청');
 
     const detail = await app.request('/api/email/uid/555', { headers: { cookie } });
-    assert.equal(detail.status, 451);
+    assert.equal(detail.status, 200);
     const detailData = await detail.json() as any;
-    assert.equal(detailData.blocked, true);
-    assert.equal(JSON.stringify(detailData).includes('계정 정보 변경 요청'), false);
+    assert.equal(detailData.subject, '비밀번호 재설정 요청');
+    assert.equal(detailData.text, '비밀번호 재설정 요청을 완료하려면 링크를 누르세요.');
   } finally {
     row.subject = original.subject;
     row.html = original.html;

@@ -76,6 +76,8 @@ interface RawEmail {
   subject: string; from: string; originalFrom: string;
   date: string; html: string | null; text: string | null; aliasTo: string;
   timestamp_sec: number;
+  restricted?: boolean;
+  warning?: string;
   extractedAuth?: {
     codes: string[];
     links: string[];
@@ -103,7 +105,7 @@ function HtmlViewer({ html }: { html: string }) {
 
 export default function MailActivityPage() {
   const params = useParams<{ aliasId: string; uid: string }>();
-  const aliasId = Number(params.aliasId);
+  const aliasId = params.aliasId || '';
   const uid     = Number(params.uid);
   const [, navigate] = useLocation();
 
@@ -128,7 +130,7 @@ export default function MailActivityPage() {
           setPinChecked(true);
           return;
         }
-        const res = await fetch(apiPath(`/sl/aliases/${aliasId}/pin/status`));
+        const res = await fetch(apiPath(`/sl/aliases/${encodeURIComponent(aliasId)}/pin/status`));
         const data = await res.json() as any;
         if (cancelled) return;
         if (!data.hasPin) {
@@ -152,12 +154,27 @@ export default function MailActivityPage() {
     try {
       const [emailRes, aliasRes] = await Promise.all([
         fetch(apiPath(`/email/uid/${uid}`), { headers: getEmailAccessHeaders(aliasId) }),
-        fetch(apiPath(`/sl/aliases/${aliasId}`)),
+        fetch(apiPath(`/sl/aliases/${encodeURIComponent(aliasId)}`)),
       ]);
       const emailData = await emailRes.json() as any;
       const aliasData = await aliasRes.json() as any;
       setAliasEmail(aliasData?.email || "");
-      if (emailData.error) setError(emailData.error);
+      if (emailData.restricted) {
+        setViewMode('meta');
+        setRawEmail({
+          subject: emailData.subject || '계정 정보 이메일',
+          from: emailData.from || '',
+          originalFrom: emailData.originalFrom || '',
+          aliasTo: emailData.aliasTo || aliasData?.email || '',
+          date: emailData.date || '',
+          timestamp_sec: Number(emailData.timestamp_sec || 0),
+          html: null,
+          text: null,
+          restricted: true,
+          warning: emailData.warning || '계정 정보 이메일 확인되었습니다. 변경하지 마세요!',
+          extractedAuth: emailData.extractedAuth,
+        });
+      } else if (emailData.error) setError(emailData.error);
       else setRawEmail(emailData);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
@@ -200,10 +217,10 @@ export default function MailActivityPage() {
   }
 
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#F8F6FF", paddingBottom: 80 }}>
+    <div className="dashboard-shell" style={{ minHeight: "100vh", background: "#F8F6FF", paddingBottom: 80 }}>
       <div style={{ background: "#fff", borderBottom: "1px solid #E9E4FF", padding: "14px 16px 12px", position: "sticky", top: 0, zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={() => navigate(`/mail/${aliasId}`)} style={{ background: "#F3F0FF", border: "none", borderRadius: 10, padding: 8, cursor: "pointer", display: "flex", alignItems: "center" }}>
+          <button aria-label="메일 목록으로 돌아가기" onClick={() => navigate(`/mail/${aliasId}`)} style={{ background: "#F3F0FF", border: "none", borderRadius: 10, padding: 8, cursor: "pointer", display: "flex", alignItems: "center" }}>
             <ArrowLeft size={17} color="#7C3AED" />
           </button>
           <div style={{ flex: 1 }}>
@@ -248,7 +265,17 @@ export default function MailActivityPage() {
                 </div>
               </div>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#1E1B4B", marginBottom: 8, lineHeight: 1.4 }}>{rawEmail.subject || "(제목 없음)"}</div>
-              {rawEmail.extractedAuth && rawEmail.extractedAuth.confidence !== 'none' && (
+              {rawEmail.restricted && (
+                <div style={{ background: '#FFF0F0', border: '1px solid #FCA5A5', borderRadius: 12, padding: '11px 12px', marginBottom: 8, color: '#DC2626' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 900 }}>
+                    <AlertCircle size={14} /> 열람 금지 메일
+                  </div>
+                  <div style={{ marginTop: 5, fontSize: 12, fontWeight: 800, lineHeight: 1.45 }}>
+                    {rawEmail.warning || '계정 정보 이메일 확인되었습니다. 변경하지 마세요!'}
+                  </div>
+                </div>
+              )}
+              {rawEmail.extractedAuth && !rawEmail.restricted && rawEmail.extractedAuth.confidence !== 'none' && (
                 <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 10, padding: '9px 10px', marginBottom: 8 }}>
                   <div style={{ fontSize: 11, fontWeight: 800, color: '#B45309', marginBottom: 6 }}>자동 추출된 인증 정보</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -274,19 +301,31 @@ export default function MailActivityPage() {
 
             <div style={{ background: "#fff", borderRadius: 16, overflow: "hidden", boxShadow: "0 2px 10px rgba(167,139,250,.08)", border: "1.5px solid #EDE9FE" }}>
               <div style={{ display: "flex", borderBottom: "1px solid #F3F0FF", background: "#F8F6FF" }}>
-                {([
-                  { id: "html" as const, label: "원본 HTML", Icon: Eye },
-                  { id: "text" as const, label: "텍스트", Icon: Code },
-                  { id: "meta" as const, label: "메타", Icon: AtSign },
-                ] as const).map(tab => (
+                {(rawEmail.restricted
+                  ? [{ id: "meta" as const, label: "메타", Icon: AtSign }]
+                  : [
+                    { id: "html" as const, label: "원본 HTML", Icon: Eye },
+                    { id: "text" as const, label: "텍스트", Icon: Code },
+                    { id: "meta" as const, label: "메타", Icon: AtSign },
+                  ] as const).map(tab => (
                   <button key={tab.id} onClick={() => setViewMode(tab.id)} style={{ flex: 1, padding: "10px 0", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: viewMode === tab.id ? "#7C3AED" : "#9CA3AF", borderBottom: viewMode === tab.id ? "2px solid #A78BFA" : "2px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
                     <tab.Icon size={13} /> {tab.label}
                   </button>
                 ))}
               </div>
               <div style={{ padding: 14 }}>
-                {viewMode === "html" && (rawEmail.html ? <HtmlViewer html={rawEmail.html} /> : <div style={{ textAlign: "center", color: "#9CA3AF", padding: "30px 0", fontSize: 13 }}>HTML 본문 없음 (텍스트 탭 확인)</div>)}
-                {viewMode === "text" && (rawEmail.text ? <pre style={{ fontSize: 12, color: "#374151", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, lineHeight: 1.6, maxHeight: 400, overflow: "auto" }}>{rawEmail.text}</pre> : <div style={{ textAlign: "center", color: "#9CA3AF", padding: "30px 0", fontSize: 13 }}>텍스트 본문 없음</div>)}
+                {rawEmail.restricted && (
+                  <div style={{ background: '#FFF0F0', border: '1px solid #FCA5A5', borderRadius: 12, padding: '14px 16px', marginBottom: 12, color: '#DC2626' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 900 }}>
+                      <AlertCircle size={16} /> 원본 열람 금지
+                    </div>
+                    <div style={{ marginTop: 7, fontSize: 13, fontWeight: 800, lineHeight: 1.5 }}>
+                      {rawEmail.warning || '계정 정보 이메일 확인되었습니다. 변경하지 마세요!'}
+                    </div>
+                  </div>
+                )}
+                {!rawEmail.restricted && viewMode === "html" && (rawEmail.html ? <HtmlViewer html={rawEmail.html} /> : <div style={{ textAlign: "center", color: "#9CA3AF", padding: "30px 0", fontSize: 13 }}>HTML 본문 없음 (텍스트 탭 확인)</div>)}
+                {!rawEmail.restricted && viewMode === "text" && (rawEmail.text ? <pre style={{ fontSize: 12, color: "#374151", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, lineHeight: 1.6, maxHeight: 400, overflow: "auto" }}>{rawEmail.text}</pre> : <div style={{ textAlign: "center", color: "#9CA3AF", padding: "30px 0", fontSize: 13 }}>텍스트 본문 없음</div>)}
                 {viewMode === "meta" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {[

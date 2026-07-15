@@ -16,7 +16,7 @@ export function getGuestId(): string {
 // ─── 서버 발급 Unlock 토큰 저장소 ─────────────────────────────
 // 키: sl_unlock_{guestId}_{aliasId}  (guestId 포함으로 브라우저별 분리)
 function tokenKey(aliasId: number | string) {
-  return `sl_unlock_${getGuestId()}_${aliasId}`;
+  return `sl_unlock_${getGuestId()}_${encodeURIComponent(String(aliasId))}`;
 }
 
 export function getUnlockToken(aliasId: number | string): string | null {
@@ -45,7 +45,7 @@ export async function isAliasUnlocked(aliasId: number | string): Promise<boolean
   const token = getUnlockToken(aliasId);
   if (!token) return false;
   try {
-    const res = await fetch(apiPath(`/sl/aliases/${aliasId}/pin/check`), {
+    const res = await fetch(apiPath(`/sl/aliases/${encodeURIComponent(String(aliasId))}/pin/check`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ unlockToken: token, guestId: getGuestId() }),

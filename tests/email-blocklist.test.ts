@@ -22,6 +22,11 @@ test('blocks emails when account-info-change keywords appear in the subject', ()
   assert.equal(result.reason, 'account-info-change-request');
 });
 
+test('blocks password reset request keywords', () => {
+  assert.equal(isBlockedEmailContent({ subject: '비밀번호 재설정 요청' }).blocked, true);
+  assert.equal(isBlockedEmailContent({ subject: 'Reset your password' }).blocked, true);
+});
+
 test('blocks emails when dangerous account-change keywords appear only in body/html', () => {
   const result = isBlockedEmailContent({
     subject: '보안 알림',
@@ -45,5 +50,11 @@ test('filters blocked rows out of list responses and reports a safe count', () =
 test('blocked response body does not echo subject body or sensitive text', () => {
   const body = blockedEmailResponseBody();
   assert.equal(body.blocked, true);
+  assert.equal(body.restricted, true);
+  assert.equal(body.warning, '계정 정보 이메일 확인되었습니다. 변경하지 마세요!');
+  assert.equal(body.html, null);
+  assert.equal(body.text, null);
+  assert.deepEqual(body.extractedAuth.codes, []);
+  assert.deepEqual(body.extractedAuth.links, []);
   assert.equal(JSON.stringify(body).includes('계정 정보 변경 요청'), false);
 });

@@ -1,7 +1,7 @@
 import { apiPath } from "./path";
 
-export async function verifyAliasPin(aliasId: number, pin: string, guestId: string) {
-  const res = await fetch(apiPath(`/sl/aliases/${aliasId}/pin/verify`), {
+export async function verifyAliasPin(aliasId: number | string, pin: string, guestId: string) {
+  const res = await fetch(apiPath(`/sl/aliases/${encodeURIComponent(String(aliasId))}/pin/verify`), {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -40,8 +40,8 @@ export async function logoutAdmin() {
   return { res, data };
 }
 
-export async function saveAliasPin(aliasId: number, pin: string) {
-  const res = await fetch(apiPath(`/admin/pins/${aliasId}`), {
+export async function saveAliasPin(aliasId: number | string, pin: string) {
+  const res = await fetch(apiPath(`/admin/pins/${encodeURIComponent(String(aliasId))}`), {
     method: "PUT",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -51,8 +51,8 @@ export async function saveAliasPin(aliasId: number, pin: string) {
   return { res, data };
 }
 
-export async function deleteAliasPin(aliasId: number) {
-  const res = await fetch(apiPath(`/admin/pins/${aliasId}`), { method: "DELETE", credentials: "include" });
+export async function deleteAliasPin(aliasId: number | string) {
+  const res = await fetch(apiPath(`/admin/pins/${encodeURIComponent(String(aliasId))}`), { method: "DELETE", credentials: "include" });
   const data = await res.json().catch(() => ({}));
   return { res, data };
 }

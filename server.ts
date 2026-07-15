@@ -80,7 +80,9 @@ async function handleRequest(req: Request): Promise<Response> {
     };
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
-      init.body = await req.clone().arrayBuffer();
+      // Preserve streaming semantics so route-level byte limits can stop oversized bodies
+      // before the entire request is buffered in memory.
+      init.body = req.body;
       init.duplex = 'half';
     }
 

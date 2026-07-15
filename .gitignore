@@ -197,3 +197,13 @@ dist
 !.env.example
 .dev.vars*
 !.dev.vars.example
+
+# Project-local agent and production runtime state
+/.brv/
+/data/
+/gmail-token.json
+/gmail-history-id.txt
+
+# Local API source backups (keep the rule scoped to src/api)
+/src/api/**/*.bak*
+/src/api/**/*backup*

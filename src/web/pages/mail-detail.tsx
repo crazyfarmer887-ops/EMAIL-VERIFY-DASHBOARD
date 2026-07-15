@@ -14,6 +14,7 @@ import {
   verifyAliasPin,
   getAdminSession,
 } from "../lib/pin-api";
+import { RestrictedMailRow } from '../components/mail-ui-contracts';
 
 // ─── 헬퍼 ──────────────────────────────────────────────────────
 const SERVICE_MAP: Record<string, string> = {
@@ -88,7 +89,7 @@ function GuidePopup({ onClose }: { onClose: () => void }) {
               <div style={{ fontSize: 12, color: '#9CA3AF' }}>이메일 확인 서비스 사용법</div>
             </div>
           </div>
-          <button onClick={onClose} style={{ background: '#F3F0FF', border: 'none', borderRadius: 10, padding: 8, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+          <button aria-label="사용법 안내 닫기" onClick={onClose} style={{ background: '#F3F0FF', border: 'none', borderRadius: 10, padding: 8, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
             <X size={16} color="#7C3AED" />
           </button>
         </div>
@@ -174,6 +175,7 @@ function NewMailBanner({ count, subject, onView, onDismiss }: {
 
         {/* 닫기 버튼 */}
         <button
+          aria-label="새 메일 알림 닫기"
           onClick={onDismiss}
           style={{ flexShrink: 0, background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', cursor: 'pointer', padding: '10px 12px', display: 'flex', alignItems: 'center' }}
         >
@@ -235,7 +237,7 @@ function PinInput({
             onKeyDown={e => { if (e.key === 'Enter') handleUnlock(); }}
             style={{ width: '100%', padding: '13px 44px 13px 38px', borderRadius: 12, border: `1.5px solid ${error ? '#FCA5A5' : '#EDE9FE'}`, fontSize: 20, letterSpacing: 8, textAlign: 'center', color: '#1E1B4B', background: '#F8F6FF', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
           />
-          <button type="button" onClick={() => setShowPin(v => !v)} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+          <button type="button" aria-label={showPin ? 'PIN 숨기기' : 'PIN 보기'} onClick={() => setShowPin(v => !v)} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
             {showPin ? <EyeOff size={16} color="#C4B5FD" /> : <Eye size={16} color="#C4B5FD" />}
           </button>
         </div>
@@ -267,6 +269,7 @@ function PinInput({
 interface DbEmail {
   uid: number; subject: string; from_addr: string;
   original_from: string; alias_to: string; date_str: string; timestamp_sec: number;
+  restricted?: boolean; blocked?: boolean; warning?: string;
 }
 
 interface Alias {
@@ -287,7 +290,7 @@ function markGuideShown() {
 // ─── 메인 페이지 ───────────────────────────────────────────────
 export default function MailDetailPage() {
   const params = useParams<{ aliasId: string }>();
-  const aliasId = Number(params.aliasId);
+  const aliasId = params.aliasId || '';
   const [, navigate] = useLocation();
 
   // 외부 직접 접속 여부 (referrer 없거나 다른 도메인이면 true)
@@ -342,9 +345,9 @@ export default function MailDetailPage() {
         if (cancelled) return;
         if (adminSession.authenticated) {
           setIsAdmin(true);
-          const aliasRes = await fetch(apiPath(`/sl/aliases/${aliasId}`));
+          const aliasRes = await fetch(apiPath(`/sl/aliases/${encodeURIComponent(aliasId)}`));
           const aliasData = await aliasRes.json() as any;
-          const pinStatusRes = await fetch(apiPath(`/sl/aliases/${aliasId}/pin/status`));
+          const pinStatusRes = await fetch(apiPath(`/sl/aliases/${encodeURIComponent(aliasId)}/pin/status`));
           const pinStatus = await pinStatusRes.json() as any;
           if (aliasData && !aliasData.error) {
             aliasData.hasPin = !!pinStatus.hasPin;
@@ -355,8 +358,8 @@ export default function MailDetailPage() {
         }
         setIsAdmin(false);
         const [pinStatusRes, aliasRes] = await Promise.all([
-          fetch(apiPath(`/sl/aliases/${aliasId}/pin/status`)),
-          fetch(apiPath(`/sl/aliases/${aliasId}`)),
+          fetch(apiPath(`/sl/aliases/${encodeURIComponent(aliasId)}/pin/status`)),
+          fetch(apiPath(`/sl/aliases/${encodeURIComponent(aliasId)}`)),
         ]);
         if (cancelled) return;
         const pinStatus = await pinStatusRes.json() as any;
@@ -382,7 +385,7 @@ export default function MailDetailPage() {
   const fetchData = async (_force = false) => {
     setLoading(true); setError(null);
     try {
-      const aliasRes = await fetch(apiPath(`/sl/aliases/${aliasId}`));
+      const aliasRes = await fetch(apiPath(`/sl/aliases/${encodeURIComponent(aliasId)}`));
       const aliasData = await aliasRes.json() as any;
       if (aliasData && !aliasData.error) {
         setAlias(aliasData);
@@ -481,10 +484,10 @@ export default function MailDetailPage() {
     const from = (e.from_addr || '').toLowerCase();
     return BLOCKED_KEYWORDS.some(kw => subject.includes(kw.toLowerCase()) || from.includes(kw.toLowerCase()));
   };
-  const recentEmails = emails.filter(e => e.timestamp_sec >= cutoff && !isBlockedEmail(e));
+  const recentEmails = emails.filter(e => e.timestamp_sec >= cutoff && (e.restricted || !isBlockedEmail(e)));
 
   return (
-    <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', background: '#F8F6FF', paddingBottom: 80 }}>
+    <div className="dashboard-shell" style={{ minHeight: '100vh', background: '#F8F6FF', paddingBottom: 80 }}>
 
       {/* 새 메일 알림 배너 */}
       {newMailBanner && (
@@ -510,7 +513,7 @@ export default function MailDetailPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {/* 뒤로가기: 외부 직접 접속이면 숨김 */}
           {!isExternalEntry && (
-            <button onClick={handleBack} style={{ background: '#F3F0FF', border: 'none', borderRadius: 10, padding: 8, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+            <button aria-label="메일함으로 돌아가기" onClick={handleBack} style={{ background: '#F3F0FF', border: 'none', borderRadius: 10, padding: 8, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
               <ArrowLeft size={17} color="#7C3AED" />
             </button>
           )}
@@ -532,6 +535,7 @@ export default function MailDetailPage() {
               </button>
             )}
             <button
+              aria-label={loading ? '메일 새로고침 중' : '메일 새로고침'}
               onClick={() => cooldown.trigger(() => fetchData(true))}
               disabled={loading || !cooldown.ready}
               style={{ background: !cooldown.ready ? '#F3F4F6' : '#EDE9FE', border: 'none', borderRadius: 10, padding: '8px 10px', cursor: (loading || !cooldown.ready) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 4, minWidth: 52, justifyContent: 'center', fontSize: 11, color: !cooldown.ready ? '#9CA3AF' : '#7C3AED', fontWeight: 600, fontFamily: 'inherit', opacity: (loading || !cooldown.ready) ? 0.7 : 1 }}
@@ -592,13 +596,15 @@ export default function MailDetailPage() {
             {recentEmails.map((email) => {
               const svc = detectService(email.from_addr);
               const sender = senderLabel(email.from_addr);
+              const isRestricted = !!email.restricted;
               return (
-                <button
+                <RestrictedMailRow
                   key={email.uid}
-                  onClick={() => navigate(`/mail/${aliasId}/email/${email.uid}`)}
-                  style={{ background: '#fff', borderRadius: 14, padding: '12px 14px', boxShadow: '0 2px 8px rgba(167,139,250,0.07)', border: '1.5px solid #EDE9FE', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', width: '100%', textAlign: 'left', fontFamily: 'inherit', transition: 'border-color 0.15s' }}
-                  onMouseEnter={e => (e.currentTarget.style.borderColor = '#A78BFA')}
-                  onMouseLeave={e => (e.currentTarget.style.borderColor = '#EDE9FE')}
+                  restricted={isRestricted}
+                  onOpen={() => navigate(`/mail/${aliasId}/email/${email.uid}`)}
+                  style={{ background: '#fff', borderRadius: 14, padding: '12px 14px', boxShadow: '0 2px 8px rgba(167,139,250,0.07)', border: `1.5px solid ${isRestricted ? '#FCA5A5' : '#EDE9FE'}`, display: 'flex', alignItems: 'center', gap: 10, cursor: isRestricted ? 'not-allowed' : 'pointer', width: '100%', textAlign: 'left', fontFamily: 'inherit', transition: 'border-color 0.15s' }}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = isRestricted ? '#FCA5A5' : '#A78BFA')}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = isRestricted ? '#FCA5A5' : '#EDE9FE')}
                 >
                   <div style={{ width: 40, height: 40, borderRadius: 11, flexShrink: 0, background: svc ? svc.bg : '#F3F0FF', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                     {svc ? <img src={svc.logo} alt={svc.label} style={{ width: 26, height: 26, objectFit: 'contain' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} /> : <Mail size={16} color="#A78BFA" />}
@@ -608,15 +614,21 @@ export default function MailDetailPage() {
                       {email.subject || '(제목 없음)'}
                     </div>
                     <div style={{ fontSize: 11, color: '#9CA3AF', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>{sender}</div>
+                    {isRestricted && (
+                      <div style={{ marginTop: 7, display: 'flex', alignItems: 'center', gap: 6, background: '#FFF0F0', border: '1px solid #FCA5A5', color: '#DC2626', borderRadius: 9, padding: '6px 8px', fontSize: 11, fontWeight: 800, lineHeight: 1.35 }}>
+                        <AlertCircle size={12} />
+                        <span>{email.warning || '계정 정보 이메일 확인되었습니다. 변경하지 마세요!'}</span>
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
-                    <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 5, background: '#EEF5FF', color: '#2563EB' }}>수신</span>
+                    <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 5, background: isRestricted ? '#FFF0F0' : '#EEF5FF', color: isRestricted ? '#DC2626' : '#2563EB' }}>{isRestricted ? '열람금지' : '수신'}</span>
                     <span style={{ fontSize: 10, color: '#C4B5FD', display: 'flex', alignItems: 'center', gap: 3 }}>
                       <Clock size={9} /> {timeAgo(email.timestamp_sec)}
                     </span>
                   </div>
                   <span style={{ fontSize: 16, color: '#C4B5FD' }}>›</span>
-                </button>
+                </RestrictedMailRow>
               );
             })}
           </div>

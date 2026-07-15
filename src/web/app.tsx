@@ -7,6 +7,7 @@ const MailListPage = lazy(() => import("./pages/mail-list"));
 const MailDetailPage = lazy(() => import("./pages/mail-detail"));
 const MailActivityPage = lazy(() => import("./pages/mail-activity"));
 const AdminPage = lazy(() => import("./pages/admin"));
+const ManagePage = lazy(() => import("./pages/manage"));
 const AgentFeedback = import.meta.env.DEV
   ? lazy(() => import("@runablehq/website-runtime").then((m) => ({ default: m.AgentFeedback })))
   : null;
@@ -24,8 +25,16 @@ function App() {
         <Switch>
           <Route path="/" component={MailListPage} />
           <Route path="/admin" component={AdminPage} />
-          <Route path="/mail/:aliasId" component={MailDetailPage} />
+          <Route path="/manage" component={ManagePage} />
           <Route path="/mail/:aliasId/email/:uid" component={MailActivityPage} />
+          <Route path="/mail/:aliasId" component={MailDetailPage} />
+          <Route>
+            <main className="route-not-found">
+              <p>404</p>
+              <h1>페이지를 찾을 수 없습니다</h1>
+              <a href="./">메일 목록으로 돌아가기</a>
+            </main>
+          </Route>
         </Switch>
         {AgentFeedback && <AgentFeedback />}
       </Suspense>
