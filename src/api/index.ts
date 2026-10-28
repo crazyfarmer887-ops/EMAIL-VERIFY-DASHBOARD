@@ -1,10 +1,11 @@
+import { createResendMailboxSync } from './email/resend-mailbox.ts';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
 import { cors } from "hono/cors";
 import { fetchRawEmail } from './email/raw-email.ts';
-import { getSubjectList, getEmailList, getEmailByUid, getLatestEmailReceivedAt } from './email/email-store.ts';
+import { getSubjectList, getEmailList, getEmailByUid, getLatestEmailReceivedAt, upsertEmail } from './email/email-store.ts';
 import { sendTelegramAlert } from './alerts/telegram.ts';
 import { extractAuthCode } from '../lib/auth-code-extractor.ts';
 import { ACCOUNT_INFO_BLOCK_LIST_SUBJECT, ACCOUNT_INFO_BLOCK_WARNING, blockedEmailResponseBody, filterBlockedEmails, isBlockedEmailContent } from '../lib/email-blocklist.ts';
@@ -36,6 +37,7 @@ function loadEnvFile() {
 
 loadEnvFile();
 
+const syncResendMailbox = createResendMailboxSync({ fetcher: fetch, upsert: upsertEmail });
 const app = new Hono().basePath('/api');
 const corsAllowedOrigins = new Set([
   'https://email-verify.one',
@@ -699,6 +701,7 @@ app.get('/email/list', async (c) => {
   const accessErr = await requireEmailAliasAccess(c, alias);
   if (accessErr) return accessErr;
   try {
+    await syncResendMailbox(alias);
     const emails = await getEmailList(alias, limit);
     const now = Math.floor(Date.now() / 1000);
     const TEN_MIN_SEC = 10 * 60;

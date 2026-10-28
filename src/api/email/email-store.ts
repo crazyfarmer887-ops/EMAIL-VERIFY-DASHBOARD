@@ -110,7 +110,7 @@ export async function findEmail(alias: string, tsSec: number, fromAddr?: string,
     if (domain) {
       const res = await pool.query<EmailRow>(
         `SELECT * FROM email_cache
-         WHERE alias_to ILIKE $1
+         WHERE uid >= 0 AND alias_to ILIKE $1
            AND timestamp_sec BETWEEN $2 AND $3
            AND (from_addr ILIKE $4 OR original_from ILIKE $4)
          ORDER BY ABS(timestamp_sec - $5) ASC, timestamp_sec ASC
@@ -124,7 +124,7 @@ export async function findEmail(alias: string, tsSec: number, fromAddr?: string,
   // 2차: alias + 시간 범위만 → 가장 최신
   const res = await pool.query<EmailRow>(
     `SELECT * FROM email_cache
-     WHERE alias_to ILIKE $1
+     WHERE uid >= 0 AND alias_to ILIKE $1
        AND timestamp_sec BETWEEN $2 AND $3
      ORDER BY ABS(timestamp_sec - $4) ASC, timestamp_sec ASC
      LIMIT 1`,
@@ -138,10 +138,10 @@ export async function getSubjectList(alias: string, limit = 30): Promise<{ times
   const res = await pool.query(
     `SELECT timestamp_sec, subject, from_addr
      FROM email_cache
-     WHERE alias_to ILIKE $1
+     WHERE alias_to ILIKE $1 AND (uid >= 0 OR lower(alias_to) = lower($3))
      ORDER BY timestamp_sec DESC
      LIMIT $2`,
-    [`%${alias}%`, limit]
+    [`%${alias}%`, limit, alias]
   );
   return res.rows;
 }
@@ -150,10 +150,10 @@ export async function getSubjectList(alias: string, limit = 30): Promise<{ times
 export async function getEmailList(alias: string, limit = 50): Promise<EmailRow[]> {
   const res = await pool.query<EmailRow>(
     `SELECT * FROM email_cache
-     WHERE alias_to ILIKE $1
+     WHERE alias_to ILIKE $1 AND (uid >= 0 OR lower(alias_to) = lower($3))
      ORDER BY timestamp_sec DESC
      LIMIT $2`,
-    [`%${alias}%`, limit]
+    [`%${alias}%`, limit, alias]
   );
   return res.rows;
 }
