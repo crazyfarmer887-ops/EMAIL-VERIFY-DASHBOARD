@@ -1,0 +1,5 @@
+# Scoped Netflix receiving and buyer mailbox
+
+Extend the existing authenticated Resend pull with a separate exact-address Netflix allowlist. Preserve Disney behavior and its allowlist. Require exact envelope and visible recipient, passing DKIM/DMARC, a Netflix sender, a valid message ID and a fresh timestamp. Cache only one unambiguous 4/6-digit authentication code or a Netflix household verification link on an explicitly allowed path. Never expose raw mail, receipts, payment data, reset/change messages, other recipients or API keys. Authorization/PIN checks must precede Resend reads. Coalesce concurrent reads and retain throttling.
+
+Verification covers service/recipient isolation, stale/spoofed/reset mail, codes/household links, ambiguity, and actual API authorization before deployment. Activate only the owner's requested mailbox after PIN setup. Rollback removes the Netflix allowlist and restores the committed prior release; Disney settings stay intact. No customer messages or payment actions are part of verification.
