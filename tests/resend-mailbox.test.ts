@@ -15,3 +15,5 @@ test('allowlist, parallel lookup deduplication, no external reads for unknown ma
  await Promise.all([sync('disney@example.com',env),sync('disney@example.com',env)]);assert.equal(reads,2);assert.equal(writes,1);
  await sync('disney@example.com',env);assert.equal(reads,2);
 });
+
+test('Korean one-time passcodes are recognized without admitting password resets',()=>{assert.ok(disneyCodeRow({...mail,subject:'MyDisney 일회용 암호',text:'일회용 암호: 123456'},'disney@example.com',now));});

@@ -3,14 +3,17 @@ import { extractAuthCode } from '../../lib/auth-code-extractor.ts';
 import type { EmailRow } from './email-store.ts';
 
 type Received = { id: string; to: string[]; from: string; subject: string; created_at: string; text?: string; html?: string; authentication?: { dkim?: string; dmarc?: string }; received_for?: string[] };
+const authSubject = (value: string) => /코드|인증|code|verification|일회용\s*(?:암호|비밀번호)|one[- ]time.*password/i.test(value) && !/reset|재설정|변경|change.*password|password.*change/i.test(value);
+const authWords = (value?: string) => value?.replace(/일회용\s*(?:암호|비밀번호)/g, '인증 코드');
 export function disneyCodeRow(mail: Received, alias: string, now = Date.now()): EmailRow | null {
+  if (!mail || !Array.isArray(mail.to) || typeof mail.from !== 'string' || typeof mail.subject !== 'string') return null;
   const timestamp = Date.parse(mail.created_at);
   const sender = mail.from.match(/<([^>]+)>/)?.[1] || mail.from;
   if (mail.authentication?.dkim !== 'pass' || mail.authentication?.dmarc !== 'pass'
     || !mail.received_for?.some(x => x.trim().toLowerCase() === alias) || !mail.to.some(x => x.trim().toLowerCase() === alias) || !/^[^@\s]+@(?:[a-z0-9-]+\.)*disneyplus\.com$/i.test(sender)
     || !/^[0-9a-f-]{36}$/i.test(mail.id) || !Number.isFinite(timestamp) || timestamp > now + 60000 || timestamp < now - 15 * 60000
-    || /비밀번호|password|reset|재설정/i.test(mail.subject) || !/코드|인증|code|verification/i.test(mail.subject)) return null;
-  const extraction = extractAuthCode({subject: mail.subject, text: mail.text, html: mail.html});
+    || !authSubject(mail.subject)) return null;
+  const extraction = extractAuthCode({subject: authWords(mail.subject), text: authWords(mail.text), html: authWords(mail.html)});
   const codes = extraction.codes.filter(x => /^\d{6}$/.test(x));
   if (codes.length !== 1 || !['high', 'medium'].includes(extraction.confidence)) return null;
   // A separate negative UID namespace avoids collisions with positive IMAP UIDs.
@@ -37,7 +40,7 @@ export function createResendMailboxSync(deps: { fetcher: typeof fetch; upsert: (
       const list = await read('/emails/receiving?limit=100') as { data?: Received[] };
       if (!Array.isArray(list.data)) throw new Error('이메일 수신 목록을 확인해주세요.');
       const candidates = list.data.filter(x => Array.isArray(x.to) && x.to.some(t => t.trim().toLowerCase() === alias)
-        && Date.parse(x.created_at) >= now - 15 * 60000 && /코드|인증|code|verification/i.test(x.subject)).slice(0, 5);
+        && Date.parse(x.created_at) >= now - 15 * 60000 && typeof x.subject === 'string' && authSubject(x.subject)).slice(0, 1);
       for (const item of candidates) {
         if (!/^[0-9a-f-]{36}$/i.test(item.id)) continue;
         const detail = await read(`/emails/receiving/${item.id}`) as Received;
